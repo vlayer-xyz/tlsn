@@ -7,6 +7,8 @@ edition = "2021"
 tlsn-core.workspace = true
 tlsn-tls-core.workspace = true
 
+p256.workspace = true
+
 hex.workspace = true
 rstest.workspace = true
 webpki-roots.workspace = true

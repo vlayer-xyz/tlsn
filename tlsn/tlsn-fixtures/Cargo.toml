@@ -6,6 +6,9 @@ edition = "2021"
 [dependencies]
 tlsn-core.workspace = true
 tlsn-tls-core.workspace = true
+mpz-core.workspace = true
+mpz-garble-core.workspace = true
+mpz-circuits.workspace = true
 
 p256.workspace = true
 

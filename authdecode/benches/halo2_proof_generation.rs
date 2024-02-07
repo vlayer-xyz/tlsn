@@ -8,15 +8,19 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::thread_rng;
 use rand::Rng;
 use std::env;
+use std::time::Duration;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("halo2_benchmark_group");
+    group.measurement_time(Duration::from_secs(22));
+
     // benchmarking single threaded halo2
     env::set_var("RAYON_NUM_THREADS", "1");
 
     let proving_key = OneTimeSetup::proving_key();
     let verification_key = OneTimeSetup::verification_key();
 
-    c.bench_function("halo2_proof_generation_single_threaded", |b| {
+    group.bench_function("halo2_proof_generation_single_threaded", |b| {
         b.iter(|| {
             // Since we can't Clone provers, we generate a new prover for each
             // iteration. This should not add more than 1-2% runtime to the bench
@@ -29,7 +33,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     // To get the actual verification time, subtract from "generation+verification"
     // time the "generation only" time from the above bench.
 
-    c.bench_function(
+    group.bench_function(
         "halo2_proof_generation_and_verification_single_threaded",
         |b| {
             b.iter(|| {
@@ -42,6 +46,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             })
         },
     );
+
+    group.finish();
 }
 
 // Runs the whole protocol and returns the prover in a state ready to create
@@ -59,7 +65,7 @@ fn create_prover(
 
     // generate random plaintext of random size up to 400 bytes
     let plaintext: Vec<u8> = core::iter::repeat_with(|| rng.gen::<u8>())
-        .take(thread_rng().gen_range(1..400))
+        .take(thread_rng().gen_range(1..1000))
         .collect();
 
     // Normally, the Prover is expected to obtain her binary labels by

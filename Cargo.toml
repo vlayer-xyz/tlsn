@@ -72,3 +72,6 @@ webpki = "0.22"
 ring = "0.16"
 bytes = "1"
 async-std = "1"
+
+[profile.bench]
+debug = true

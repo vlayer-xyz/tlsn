@@ -61,7 +61,12 @@ impl Prove for Prover {
 
         // prepare the proving system and generate the proof:
 
-        let circuit = AuthDecodeCircuit::new(plaintext, bigint_to_f(&input.salt), deltas_as_rows);
+        let circuit = AuthDecodeCircuit::new(
+            plaintext,
+            bigint_to_f(&input.plaintext_salt),
+            bigint_to_f(&input.label_sum_salt),
+            deltas_as_rows,
+        );
 
         let params = &self.proving_key.params;
         let pk = &self.proving_key.key;
@@ -198,8 +203,12 @@ mod tests {
             ];
             good_inputs.push(tmp);
 
-            let circuit =
-                AuthDecodeCircuit::new(good_plaintext, bigint_to_f(&input.salt), deltas_as_rows);
+            let circuit = AuthDecodeCircuit::new(
+                good_plaintext,
+                bigint_to_f(&input.plaintext_salt),
+                bigint_to_f(&input.label_sum_salt),
+                deltas_as_rows,
+            );
 
             // Test with the correct inputs.
             // Expect successful verification.
@@ -251,8 +260,12 @@ mod tests {
 
             let mut bad_plaintext = good_plaintext;
             bad_plaintext[0] = F::from(123);
-            let circuit =
-                AuthDecodeCircuit::new(bad_plaintext, bigint_to_f(&input.salt), deltas_as_rows);
+            let circuit = AuthDecodeCircuit::new(
+                bad_plaintext,
+                bigint_to_f(&input.plaintext_salt),
+                bigint_to_f(&input.label_sum_salt),
+                deltas_as_rows,
+            );
             let prover = MockProver::run(K, &circuit, good_inputs.clone()).unwrap();
             assert!(prover.verify().is_err());
 
@@ -260,8 +273,12 @@ mod tests {
             // Expect verification error.
 
             let bad_salt = BigUint::from(123u8);
-            let circuit =
-                AuthDecodeCircuit::new(good_plaintext, bigint_to_f(&bad_salt), deltas_as_rows);
+            let circuit = AuthDecodeCircuit::new(
+                good_plaintext,
+                bigint_to_f(&bad_salt),
+                bigint_to_f(&bad_salt),
+                deltas_as_rows,
+            );
             let prover = MockProver::run(K, &circuit, good_inputs.clone()).unwrap();
             assert!(prover.verify().is_err());
 

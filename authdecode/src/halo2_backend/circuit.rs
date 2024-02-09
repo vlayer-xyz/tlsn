@@ -87,8 +87,8 @@ pub struct TopLevelConfig {
     dot_product: Column<Advice>,
     /// Expected 64-bit limb composed into an integer
     expected_limbs: Column<Advice>,
-    /// The salt will be placed into the 1st row of this column
-    salt: Column<Advice>,
+    /// The plaintext salt and label sum salt will be placed into the 1st 2 rows of this column
+    salts: Column<Advice>,
 
     /// Each row of deltas corresponds to one limb of plaintext
     deltas: [Column<Instance>; CELLS_PER_ROW],
@@ -128,8 +128,10 @@ pub struct TopLevelConfig {
 pub struct AuthDecodeCircuit {
     /// plaintext is private input
     plaintext: [F; TOTAL_FIELD_ELEMENTS],
-    /// salt is private input
-    salt: F,
+    /// plaintext_salt is private input
+    plaintext_salt: F,
+    /// label_sum_salt is private input
+    label_sum_salt: F,
     /// deltas is a public input.
     /// Since halo2 doesn't allow to access deltas which we passed in
     /// [crate::prover::Prove::prove],
@@ -147,7 +149,8 @@ impl Circuit<F> for AuthDecodeCircuit {
     fn without_witnesses(&self) -> Self {
         Self {
             plaintext: Default::default(),
-            salt: Default::default(),
+            plaintext_salt: Default::default(),
+            label_sum_salt: Default::default(),
             deltas: [[Default::default(); CELLS_PER_ROW]; USEFUL_ROWS],
         }
     }
@@ -174,8 +177,8 @@ impl Circuit<F> for AuthDecodeCircuit {
         let expected_limbs = meta.advice_column();
         meta.enable_equality(expected_limbs);
 
-        let salt = meta.advice_column();
-        meta.enable_equality(salt);
+        let salts = meta.advice_column();
+        meta.enable_equality(salts);
 
         let scratch_space: [Column<Advice>; 5] = (0..5)
             .map(|_| {
@@ -231,7 +234,7 @@ impl Circuit<F> for AuthDecodeCircuit {
             scratch_space,
             dot_product,
             expected_limbs,
-            salt,
+            salts,
             advice_from_instance,
 
             deltas,
@@ -368,8 +371,18 @@ impl Circuit<F> for AuthDecodeCircuit {
                 // limb for each row
                 let mut assigned_limbs = Vec::new();
                 //salt
-                let assigned_salt =
-                    region.assign_advice(|| "", cfg.salt, 0, || Value::known(self.salt))?;
+                let assigned_plaintext_salt = region.assign_advice(
+                    || "",
+                    cfg.salts,
+                    0,
+                    || Value::known(self.plaintext_salt),
+                )?;
+                let assigned_label_sum_salt = region.assign_advice(
+                    || "",
+                    cfg.salts,
+                    1,
+                    || Value::known(self.label_sum_salt),
+                )?;
 
                 for j in 0..FULL_FIELD_ELEMENTS + 1 {
                     // decompose the private field element into bits
@@ -451,8 +464,13 @@ impl Circuit<F> for AuthDecodeCircuit {
                 offset += 1;
 
                 // add salt
-                let label_sum_salted =
-                    self.add_salt(label_sum, assigned_salt.clone(), &mut region, &cfg, offset)?;
+                let label_sum_salted = self.add_salt(
+                    label_sum,
+                    assigned_label_sum_salt,
+                    &mut region,
+                    &cfg,
+                    offset,
+                )?;
                 offset += 1;
 
                 // Constrains each chunks of 4 limbs to be equal to a cell and
@@ -473,7 +491,7 @@ impl Circuit<F> for AuthDecodeCircuit {
                 let pt_len = plaintext.len();
                 let last_with_salt = self.add_salt(
                     plaintext[pt_len - 1].clone(),
-                    assigned_salt,
+                    assigned_plaintext_salt,
                     &mut region,
                     &cfg,
                     offset,
@@ -545,10 +563,16 @@ impl Circuit<F> for AuthDecodeCircuit {
 }
 
 impl AuthDecodeCircuit {
-    pub fn new(plaintext: [F; 15], salt: F, deltas: [[F; CELLS_PER_ROW]; USEFUL_ROWS]) -> Self {
+    pub fn new(
+        plaintext: [F; 15],
+        plaintext_salt: F,
+        label_sum_salt: F,
+        deltas: [[F; CELLS_PER_ROW]; USEFUL_ROWS],
+    ) -> Self {
         Self {
             plaintext,
-            salt,
+            plaintext_salt,
+            label_sum_salt,
             deltas,
         }
     }

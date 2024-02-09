@@ -21,6 +21,7 @@ impl OneTimeSetup {
         let circuit = AuthDecodeCircuit::new(
             Default::default(),
             Default::default(),
+            Default::default(),
             [[Default::default(); CELLS_PER_ROW]; USEFUL_ROWS],
         );
 
@@ -35,6 +36,7 @@ impl OneTimeSetup {
         let params: Params<EqAffine> = Params::new(K);
         // we need an instance of the circuit, the exact inputs don't matter
         let circuit = AuthDecodeCircuit::new(
+            Default::default(),
             Default::default(),
             Default::default(),
             [[Default::default(); CELLS_PER_ROW]; USEFUL_ROWS],

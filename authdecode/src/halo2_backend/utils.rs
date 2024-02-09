@@ -72,7 +72,7 @@ fn test_bigint_to_f() {
 /// Converts `F` into a `BigUint` type.
 /// The assumption is that the field is <= 256 bits
 pub fn f_to_bigint(f: &F) -> BigUint {
-    let tmp: [u8; 32] = f.try_into().unwrap();
+    let tmp: [u8; 32] = f.into();
     BigUint::from_bytes_le(&tmp)
 }
 #[test]

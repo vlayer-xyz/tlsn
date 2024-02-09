@@ -64,10 +64,12 @@ type Chunk = Vec<BigUint>;
 
 /// Before hashing a [Chunk], it is salted by shifting its last element to the
 /// left by [Prove::salt_size] and placing the salt into the low bits.
-/// This same salt is also used to salt the sum of all the labels corresponding
-/// to the [Chunk].
 /// Without the salt, a hash of plaintext with low entropy could be brute-forced.
-type Salt = BigUint;
+type PlaintextSalt = BigUint;
+
+/// Before hashing the sum of arithmetic labels, it is salted by shifting its last element to the
+/// left by [Prove::salt_size] and placing the salt into the low bits.
+type LabelSumSalt = BigUint;
 
 /// A Poseidon hash digest of a [Salt]ed [Chunk]. This is an EC field element.
 type PlaintextHash = BigUint;
@@ -95,7 +97,7 @@ mod tests {
     use crate::utils::*;
     use crate::verifier::VerifyMany;
     use crate::verifier::{AuthDecodeVerifier, VerifierError, Verify};
-    use crate::{Proof, Salt};
+    use crate::{PlaintextSalt, Proof};
     use rand::{thread_rng, Rng};
 
     /// Accepts a concrete Prover and Verifier and runs the whole AuthDecode
@@ -135,7 +137,11 @@ mod tests {
     pub fn run_until_proofs_are_generated(
         prover: Box<dyn Prove>,
         verifier: Box<dyn Verify>,
-    ) -> (Vec<Proof>, Vec<Salt>, AuthDecodeVerifier<VerifyMany>) {
+    ) -> (
+        Vec<Proof>,
+        Vec<PlaintextSalt>,
+        AuthDecodeVerifier<VerifyMany>,
+    ) {
         let mut rng = thread_rng();
 
         // generate random plaintext of random size up to 1000 bytes

@@ -6,7 +6,8 @@ use crate::utils::{
     u8vec_to_boolvec,
 };
 use crate::{
-    Chunk, Delta, LabelSumHash, Plaintext, PlaintextHash, PlaintextSize, Proof, Salt, ZeroSum,
+    Chunk, Delta, LabelSumHash, LabelSumSalt, Plaintext, PlaintextHash, PlaintextSalt,
+    PlaintextSize, Proof, ZeroSum,
 };
 use crate::{ARITHMETIC_LABEL_SIZE, MAX_CHUNK_COUNT, MAX_CHUNK_SIZE};
 use aes::{Aes128, BlockDecrypt, NewBlockCipher};
@@ -59,7 +60,8 @@ pub struct ProofInput {
 
     // Private
     pub plaintext: Chunk,
-    pub salt: Salt,
+    pub plaintext_salt: PlaintextSalt,
+    pub label_sum_salt: LabelSumSalt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -102,7 +104,7 @@ impl State for Setup {}
 pub struct PlaintextCommitment {
     plaintext_size: PlaintextSize,
     chunks: Vec<Chunk>,
-    salts: Vec<Salt>,
+    plaintext_salts: Vec<PlaintextSalt>,
 }
 impl State for PlaintextCommitment {}
 
@@ -111,7 +113,7 @@ impl State for PlaintextCommitment {}
 pub struct LabelSumCommitment {
     plaintext_size: PlaintextSize,
     chunks: Vec<Chunk>,
-    salts: Vec<Salt>,
+    plaintext_salts: Vec<PlaintextSalt>,
     plaintext_hashes: Vec<PlaintextHash>,
 }
 impl State for LabelSumCommitment {}
@@ -120,8 +122,9 @@ impl State for LabelSumCommitment {}
 #[derive(Default)]
 pub struct BinaryLabelsAuthenticated {
     chunks: Vec<Chunk>,
-    salts: Vec<Salt>,
+    plaintext_salts: Vec<PlaintextSalt>,
     plaintext_hashes: Vec<PlaintextHash>,
+    label_sum_salts: Vec<LabelSumSalt>,
     label_sum_hashes: Vec<LabelSumHash>,
     arith_label_check: ArithmeticLabelCheck,
 }
@@ -131,8 +134,9 @@ impl State for BinaryLabelsAuthenticated {}
 #[derive(Default)]
 pub struct AuthenticateArithmeticLabels {
     chunks: Vec<Chunk>,
-    salts: Vec<Salt>,
+    plaintext_salts: Vec<PlaintextSalt>,
     plaintext_hashes: Vec<PlaintextHash>,
+    label_sum_salts: Vec<LabelSumSalt>,
     label_sum_hashes: Vec<LabelSumHash>,
     arith_label_check: ArithmeticLabelCheck,
     // Garbled circuit's output labels. We call them "binary" to distinguish
@@ -144,8 +148,9 @@ impl State for AuthenticateArithmeticLabels {}
 // see comments to the field's type.
 pub struct ProofCreation {
     chunks: Vec<Chunk>,
-    salts: Vec<Salt>,
+    plaintext_salts: Vec<PlaintextSalt>,
     plaintext_hashes: Vec<PlaintextHash>,
+    label_sum_salts: Vec<LabelSumSalt>,
     label_sum_hashes: Vec<LabelSumHash>,
     deltas: Vec<Delta>,
     zero_sums: Vec<ZeroSum>,
@@ -222,7 +227,7 @@ impl AuthDecodeProver<Setup> {
             state: PlaintextCommitment {
                 plaintext_size: self.state.plaintext.len() * 8,
                 chunks,
-                salts,
+                plaintext_salts: salts,
             },
             prover: self.prover,
         })
@@ -234,7 +239,7 @@ impl AuthDecodeProver<Setup> {
     fn plaintext_to_chunks(
         &self,
         plaintext: &Plaintext,
-    ) -> Result<(Vec<Chunk>, Vec<Salt>), ProverError> {
+    ) -> Result<(Vec<Chunk>, Vec<PlaintextSalt>), ProverError> {
         // chunk size
         let cs = &self.prover.chunk_size();
 
@@ -286,7 +291,7 @@ impl AuthDecodeProver<PlaintextCommitment> {
     pub fn plaintext_commitment(
         self,
     ) -> Result<(Vec<PlaintextHash>, AuthDecodeProver<LabelSumCommitment>), ProverError> {
-        let hashes = self.salt_and_hash_chunks(&self.state.chunks, &self.state.salts)?;
+        let hashes = self.salt_and_hash_chunks(&self.state.chunks, &self.state.plaintext_salts)?;
 
         Ok((
             hashes.clone(),
@@ -295,7 +300,7 @@ impl AuthDecodeProver<PlaintextCommitment> {
                     plaintext_size: self.state.plaintext_size,
                     plaintext_hashes: hashes,
                     chunks: self.state.chunks,
-                    salts: self.state.salts,
+                    plaintext_salts: self.state.plaintext_salts,
                 },
                 prover: self.prover,
             },
@@ -307,7 +312,7 @@ impl AuthDecodeProver<PlaintextCommitment> {
     fn salt_and_hash_chunks(
         &self,
         chunks: &[Chunk],
-        salts: &[Salt],
+        salts: &[PlaintextSalt],
     ) -> Result<Vec<BigUint>, ProverError> {
         chunks
             .iter()
@@ -321,7 +326,7 @@ impl AuthDecodeProver<PlaintextCommitment> {
 
     /// Puts salt into the low bits of the last field element of the chunk.
     /// Returns the salted chunk.
-    fn salt_chunk(&self, chunk: &Chunk, salt: &Salt) -> Result<Chunk, ProverError> {
+    fn salt_chunk(&self, chunk: &Chunk, salt: &PlaintextSalt) -> Result<Chunk, ProverError> {
         let len = chunk.len();
         let last_fe = chunk[len - 1].clone();
 
@@ -354,9 +359,19 @@ impl AuthDecodeProver<LabelSumCommitment> {
 
         let arith_label_check = ArithmeticLabelCheck::new(&ciphertexts);
 
+        let mut rng = thread_rng();
+        let salts: Vec<LabelSumSalt> = (0..sums.len())
+            .map(|_| {
+                let salt: Vec<bool> = core::iter::repeat_with(|| rng.gen::<bool>())
+                    .take(self.prover.salt_size())
+                    .collect::<Vec<_>>();
+                bits_to_bigint(&salt)
+            })
+            .collect();
+
         let res: Result<Vec<LabelSumHash>, ProverError> = sums
             .iter()
-            .zip(self.state.salts.iter())
+            .zip(salts.clone())
             .map(|(sum, salt)| {
                 // We want to pack `sum` and `salt` into a field element like this:
                 // | leading zeroes | sum |       salt        |
@@ -378,8 +393,9 @@ impl AuthDecodeProver<LabelSumCommitment> {
                 state: BinaryLabelsAuthenticated {
                     chunks: self.state.chunks,
                     label_sum_hashes,
+                    label_sum_salts: salts,
                     plaintext_hashes: self.state.plaintext_hashes,
-                    salts: self.state.salts,
+                    plaintext_salts: self.state.plaintext_salts,
                     arith_label_check,
                 },
                 prover: self.prover,
@@ -454,8 +470,9 @@ impl AuthDecodeProver<BinaryLabelsAuthenticated> {
                 state: AuthenticateArithmeticLabels {
                     chunks: self.state.chunks,
                     label_sum_hashes: self.state.label_sum_hashes,
+                    label_sum_salts: self.state.label_sum_salts,
                     plaintext_hashes: self.state.plaintext_hashes,
-                    salts: self.state.salts,
+                    plaintext_salts: self.state.plaintext_salts,
                     arith_label_check: self.state.arith_label_check,
                     all_binary_labels: all_binary_labels.unwrap(),
                 },
@@ -512,8 +529,9 @@ impl AuthDecodeProver<AuthenticateArithmeticLabels> {
             state: ProofCreation {
                 chunks: self.state.chunks,
                 label_sum_hashes: self.state.label_sum_hashes,
+                label_sum_salts: self.state.label_sum_salts,
                 plaintext_hashes: self.state.plaintext_hashes,
-                salts: self.state.salts,
+                plaintext_salts: self.state.plaintext_salts,
                 deltas,
                 zero_sums,
             },
@@ -525,14 +543,14 @@ impl AuthDecodeProver<AuthenticateArithmeticLabels> {
 impl AuthDecodeProver<ProofCreation> {
     /// Creates zk proofs of label decoding for each chunk of plaintext.
     /// Returns serialized proofs and salts.
-    pub fn create_zk_proofs(self) -> Result<(Vec<Proof>, Vec<Salt>), ProverError> {
+    pub fn create_zk_proofs(self) -> Result<(Vec<Proof>, Vec<PlaintextSalt>), ProverError> {
         let proofs = self
             .create_zkproof_inputs(&self.state.zero_sums, self.state.deltas.clone())
             .iter()
             .map(|i| self.prover.prove(i.clone()))
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok((proofs, self.state.salts))
+        Ok((proofs, self.state.plaintext_salts))
     }
 
     /// Returns [ProofInput]s for each [Chunk].
@@ -558,7 +576,8 @@ impl AuthDecodeProver<ProofCreation> {
                 label_sum_hash: self.state.label_sum_hashes[i].clone(),
                 sum_of_zero_labels: zero_sum[i].clone(),
                 plaintext: self.state.chunks[i].clone(),
-                salt: self.state.salts[i].clone(),
+                plaintext_salt: self.state.plaintext_salts[i].clone(),
+                label_sum_salt: self.state.label_sum_salts[i].clone(),
                 deltas: chunks_of_deltas[i].clone(),
             })
             .collect()

@@ -65,7 +65,7 @@ fn create_prover(
 
     // generate random plaintext of random size up to 400 bytes
     let plaintext: Vec<u8> = core::iter::repeat_with(|| rng.gen::<u8>())
-        .take(thread_rng().gen_range(1..1000))
+        .take(thread_rng().gen_range(1..400))
         .collect();
 
     // Normally, the Prover is expected to obtain her binary labels by

@@ -6,6 +6,10 @@ edition = "2021"
 [lib]
 name = "authdecode"
 
+[[bin]]
+name = "debug"
+path = "./src/debug.rs"
+
 [dependencies]
 thiserror.workspace = true
 num.workspace = true
@@ -15,12 +19,14 @@ cipher.workspace = true
 rand_chacha.workspace = true
 sha2 = { workspace = true, features = ["compress"] }
 
-#dependencies for halo2
-halo2_proofs = { git = "https://github.com/zcash/halo2", version = "0.3"}
+# dependencies for halo2 
+halo2_proofs = { git = "https://github.com/zcash/halo2", version = "0.3", features = ["dev-graph"]}
 halo2_gadgets = { git = "https://github.com/zcash/halo2", version = "0.3"}
 pasta_curves = "0.5"
 group = "0.13"
 ff = "0.13"
+plotters = { version = "0.3.5" }
+structopt = "0.3.26"
 
 [dev-dependencies]
 hex.workspace = true

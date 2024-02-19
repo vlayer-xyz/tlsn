@@ -163,7 +163,7 @@ pub trait Prove {
     fn prove(&self, input: ProofInput) -> Result<Proof, ProverError>;
 
     /// Returns how many bits of plaintext we will pack into one field element.
-    /// Normally, this should be [crate::Verify::field_size] minus 1.
+    /// Normally, this should be [crate::verifier::Verify::field_size] minus 1.
     fn useful_bits(&self) -> usize;
 
     /// How many field elements the Poseidon hash consumes for one permutation.
@@ -173,12 +173,16 @@ pub trait Prove {
     /// [Prove::poseidon_rate()] field elements.
     fn permutation_count(&self) -> usize;
 
-    /// The size of the hash's salt in bits. The salt takes up the least
+    /// The size of the plaintext hash's salt in bits. The salt takes up the least
     /// bits of the last field element.
-    fn salt_size(&self) -> usize;
+    fn plaintext_salt_size(&self) -> usize;
+
+    /// The size of the label sum hash's salt in bits. The salt takes up the least
+    /// bits of the last field element.
+    fn label_sum_salt_size(&self) -> usize;
 
     /// How many bits of [Plaintext] can fit into one [Chunk]. This does not
-    /// include the [Salt] of the hash - which takes up the remaining least bits
+    /// include the [PlaintextSalt] of the hash - which takes up the remaining least bits
     /// of the last field element of each chunk.
     fn chunk_size(&self) -> usize;
 
@@ -212,7 +216,7 @@ impl AuthDecodeProver<Setup> {
         if self.state.plaintext.is_empty() {
             return Err(ProverError::EmptyPlaintext);
         }
-        if self.prover.useful_bits() < self.prover.salt_size() {
+        if self.prover.useful_bits() < self.prover.plaintext_salt_size() {
             // last field element must be large enough to contain the salt.
             // In the future, if we need to support fields < salt,
             // we can put the salt into multiple field elements.
@@ -235,7 +239,7 @@ impl AuthDecodeProver<Setup> {
 
     /// Creates chunks of plaintext (each chunk will have a separate zk proof).
     /// If there is not enough plaintext to fill the whole chunk, we fill the gap
-    /// with zero bits. Returns all [Chunk]s and all [Salt]s.
+    /// with zero bits. Returns all [Chunk]s and all [PlaintextSalt]s.
     fn plaintext_to_chunks(
         &self,
         plaintext: &Plaintext,
@@ -244,7 +248,7 @@ impl AuthDecodeProver<Setup> {
         let cs = &self.prover.chunk_size();
 
         // the amount of field elements per chunk
-        let fes_per_chunk = (cs + self.prover.salt_size()) / self.prover.useful_bits();
+        let fes_per_chunk = (cs + self.prover.plaintext_salt_size()) / self.prover.useful_bits();
 
         if fes_per_chunk != self.prover.poseidon_rate() * self.prover.permutation_count() {
             // can only happen if there is a logic error in `Prove` impl
@@ -276,7 +280,7 @@ impl AuthDecodeProver<Setup> {
                 // generate the salt for this chunk. Do not apply the salt to the
                 // chunk but store it separately.
                 let salt: Vec<bool> = core::iter::repeat_with(|| rng.gen::<bool>())
-                    .take(self.prover.salt_size())
+                    .take(self.prover.plaintext_salt_size())
                     .collect::<Vec<_>>();
 
                 (chunk_of_fes, bits_to_bigint(&salt))
@@ -286,7 +290,7 @@ impl AuthDecodeProver<Setup> {
 }
 
 impl AuthDecodeProver<PlaintextCommitment> {
-    /// Returns a vec of [Salt]ed Poseidon hashes for each [Chunk] and the next
+    /// Returns a vec of [PlaintextSalt]ed Poseidon hashes for each [Chunk] and the next
     /// expected state.
     pub fn plaintext_commitment(
         self,
@@ -330,20 +334,20 @@ impl AuthDecodeProver<PlaintextCommitment> {
         let len = chunk.len();
         let last_fe = chunk[len - 1].clone();
 
-        if last_fe.bits() as usize > self.prover.useful_bits() - self.prover.salt_size() {
+        if last_fe.bits() as usize > self.prover.useful_bits() - self.prover.plaintext_salt_size() {
             // can only happen if there is a logic error in this code
             return Err(ProverError::WrongLastFieldElementBitCount);
         }
 
         let mut salted_chunk = chunk.clone();
-        salted_chunk[len - 1] = last_fe.shl(self.prover.salt_size()) + salt;
+        salted_chunk[len - 1] = last_fe.shl(self.prover.plaintext_salt_size()) + salt;
         Ok(salted_chunk)
     }
 }
 
 impl AuthDecodeProver<LabelSumCommitment> {
     /// Computes the sum of all arithmetic labels for each chunk of plaintext.
-    /// Returns the [Salt]ed hash of each sum and the next expected state.
+    /// Returns the [LabelSumSalt]ed hash of each sum and the next expected state.
     pub fn label_sum_commitment(
         self,
         ciphertexts: Vec<[[u8; 16]; 2]>,
@@ -363,7 +367,7 @@ impl AuthDecodeProver<LabelSumCommitment> {
         let salts: Vec<LabelSumSalt> = (0..sums.len())
             .map(|_| {
                 let salt: Vec<bool> = core::iter::repeat_with(|| rng.gen::<bool>())
-                    .take(self.prover.salt_size())
+                    .take(self.prover.label_sum_salt_size())
                     .collect::<Vec<_>>();
                 bits_to_bigint(&salt)
             })
@@ -377,7 +381,7 @@ impl AuthDecodeProver<LabelSumCommitment> {
                 // | leading zeroes | sum |       salt        |
                 //                         \                 /
                 //                          \    low bits   /
-                let salted_sum = sum.shl(self.prover.salt_size()) + salt;
+                let salted_sum = sum.shl(self.prover.label_sum_salt_size()) + salt;
 
                 self.prover.hash(&[salted_sum])
             })
@@ -612,8 +616,12 @@ mod tests {
             1
         }
 
-        fn salt_size(&self) -> usize {
+        fn plaintext_salt_size(&self) -> usize {
             125
+        }
+
+        fn label_sum_salt_size(&self) -> usize {
+            128
         }
 
         fn chunk_size(&self) -> usize {
@@ -638,7 +646,7 @@ mod tests {
     }
 
     #[test]
-    /// Sets useful_bits() < salt_size() and triggers [ProverError::NoRoomForSalt]
+    /// Sets useful_bits() < plaintext_salt_size() and triggers [ProverError::NoRoomForSalt]
     fn test_error_no_room_for_salt() {
         struct TestProver {}
         impl Prove for TestProver {
@@ -658,8 +666,12 @@ mod tests {
                 1
             }
 
-            fn salt_size(&self) -> usize {
+            fn plaintext_salt_size(&self) -> usize {
                 125
+            }
+
+            fn label_sum_salt_size(&self) -> usize {
+                128
             }
 
             fn chunk_size(&self) -> usize {
@@ -703,8 +715,12 @@ mod tests {
                 1
             }
 
-            fn salt_size(&self) -> usize {
+            fn plaintext_salt_size(&self) -> usize {
                 125
+            }
+
+            fn label_sum_salt_size(&self) -> usize {
+                128
             }
 
             fn chunk_size(&self) -> usize {
@@ -748,8 +764,12 @@ mod tests {
                 1
             }
 
-            fn salt_size(&self) -> usize {
+            fn plaintext_salt_size(&self) -> usize {
                 125
+            }
+
+            fn label_sum_salt_size(&self) -> usize {
+                128
             }
 
             fn chunk_size(&self) -> usize {
@@ -807,8 +827,12 @@ mod tests {
                 1
             }
 
-            fn salt_size(&self) -> usize {
+            fn plaintext_salt_size(&self) -> usize {
                 125
+            }
+
+            fn label_sum_salt_size(&self) -> usize {
+                128
             }
 
             fn chunk_size(&self) -> usize {
@@ -932,8 +956,12 @@ mod tests {
                 1
             }
 
-            fn salt_size(&self) -> usize {
+            fn plaintext_salt_size(&self) -> usize {
                 125
+            }
+
+            fn label_sum_salt_size(&self) -> usize {
+                128
             }
 
             fn chunk_size(&self) -> usize {

@@ -38,7 +38,7 @@ use num::BigUint;
 const ARITHMETIC_LABEL_SIZE: usize = 96;
 
 /// The maximum supported size (in bits) of one [Chunk] of plaintext.
-/// Should not exceed 2^{ [prover::Prove::useful_bits] - [prover::Prove::salt_size]
+/// Should not exceed 2^{ [prover::Prove::useful_bits] - [prover::Prove::plaintext_salt_size]
 /// - [ARITHMETIC_LABEL_SIZE] }.
 /// 2^20 should suffice for most use cases.
 const MAX_CHUNK_SIZE: usize = 1 << 20;
@@ -56,25 +56,25 @@ type Plaintext = Vec<u8>;
 type PlaintextSize = usize;
 
 /// A chunk of [Plaintext]. The amount of vec elements equals
-/// [Prove::poseidon_rate] * [Prove::permutation_count]. Each vec element
-/// is an "Elliptic curve field element" into which [Prove::useful_bits] bits
+/// [prover::Prove::poseidon_rate] * [prover::Prove::permutation_count]. Each vec element
+/// is an "Elliptic curve field element" into which [prover::Prove::useful_bits] bits
 /// of [Plaintext] is packed.
-/// The chunk does NOT contain the [Salt].
+/// The chunk does NOT contain the [PlaintextSalt].
 type Chunk = Vec<BigUint>;
 
 /// Before hashing a [Chunk], it is salted by shifting its last element to the
-/// left by [Prove::salt_size] and placing the salt into the low bits.
+/// left by [prover::Prove::plaintext_salt_size] and placing the salt into the low bits.
 /// Without the salt, a hash of plaintext with low entropy could be brute-forced.
 type PlaintextSalt = BigUint;
 
 /// Before hashing the sum of arithmetic labels, it is salted by shifting its last element to the
-/// left by [Prove::salt_size] and placing the salt into the low bits.
+/// left by [prover::Prove::label_sum_salt_size] and placing the salt into the low bits.
 type LabelSumSalt = BigUint;
 
-/// A Poseidon hash digest of a [Salt]ed [Chunk]. This is an EC field element.
+/// A Poseidon hash digest of a [PlaintextSalt]ed [Chunk]. This is an EC field element.
 type PlaintextHash = BigUint;
 
-/// A Poseidon hash digest of a [Salt]ed arithmetic sum of arithmetic labels
+/// A Poseidon hash digest of a [LabelSumSalt]ed arithmetic sum of arithmetic labels
 /// corresponding to the [Chunk]. This is an EC field element.
 type LabelSumHash = BigUint;
 

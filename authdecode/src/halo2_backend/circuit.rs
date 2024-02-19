@@ -66,13 +66,16 @@ pub const CELLS_PER_ROW: usize = 64;
 /// (cs.blinding_factors() + 1)
 pub const USEFUL_ROWS: usize = 58;
 
-/// The size of the salt of the hash in bits.
+/// The size of the salt of the plaintext hash in bits.
 ///
 /// We don't use the usual 128 bits, because it is convenient to put two 64-bit
 /// limbs of plaintext into the field element (which has 253 useful bits, see
 /// [super::USEFUL_BITS]) and use the remaining 125 bits of the field element
 /// for the salt (see [crate::Salt]).
-pub const SALT_SIZE: usize = 125;
+pub const PLAINTEXT_SALT_SIZE: usize = 125;
+
+/// The size of the salt of the label sum hash in bits.
+pub const LABEL_SUM_SALT_SIZE: usize = 128;
 
 type F = pallas::Base;
 
@@ -111,8 +114,10 @@ pub struct TopLevelConfig {
     selector_sum4: Selector,
     /// Sums 2 cells
     selector_sum2: Selector,
-    /// Left-shifts the first cell by the size of the salt and adds the salt
-    selector_add_salt: Selector,
+    /// Left-shifts the first cell by the size of the plaintext salt and adds the salt
+    selector_add_plaintext_salt: Selector,
+    /// Left-shifts the first cell by the size of the label sum salt and adds the salt
+    selector_add_label_sum_salt: Selector,
 
     /// config for Poseidon with rate 15
     poseidon_config_rate15: Pow5Config<Fp, 16, 15>,
@@ -215,7 +220,8 @@ impl Circuit<F> for AuthDecodeCircuit {
             .unwrap();
         let selector_sum4 = meta.selector();
         let selector_sum2 = meta.selector();
-        let selector_add_salt = meta.selector();
+        let selector_add_plaintext_salt = meta.selector();
+        let selector_add_label_sum_salt = meta.selector();
 
         // POSEIDON
 
@@ -244,7 +250,8 @@ impl Circuit<F> for AuthDecodeCircuit {
             selector_binary_check,
             selector_sum4,
             selector_sum2,
-            selector_add_salt,
+            selector_add_plaintext_salt,
+            selector_add_label_sum_salt,
 
             poseidon_config_rate15,
             poseidon_config_rate1,
@@ -346,15 +353,27 @@ impl Circuit<F> for AuthDecodeCircuit {
             vec![sel * (sum - expected)]
         });
 
-        // left-shifts the first cell by SALT_SIZE and adds the second cell (the salt)
-        meta.create_gate("add salt", |meta| {
+        // left-shifts the first cell by PLAINTEXT_SALT_SIZE and adds the second cell (the salt)
+        meta.create_gate("add plaintext salt", |meta| {
             let cell = meta.query_advice(cfg.scratch_space[0], Rotation::cur());
             let salt = meta.query_advice(cfg.scratch_space[1], Rotation::cur());
-            let sum = cell * pow_2_x[SALT_SIZE].clone() + salt;
+            let sum = cell * pow_2_x[PLAINTEXT_SALT_SIZE].clone() + salt;
 
             // constrain to match the expected value
             let expected = meta.query_advice(cfg.scratch_space[4], Rotation::cur());
-            let sel = meta.query_selector(cfg.selector_add_salt);
+            let sel = meta.query_selector(cfg.selector_add_plaintext_salt);
+            vec![sel * (sum - expected)]
+        });
+
+        // left-shifts the first cell by LABEL_SUM_SALT_SIZE and adds the second cell (the salt)
+        meta.create_gate("add label sum salt", |meta| {
+            let cell = meta.query_advice(cfg.scratch_space[0], Rotation::cur());
+            let salt = meta.query_advice(cfg.scratch_space[1], Rotation::cur());
+            let sum = cell * pow_2_x[LABEL_SUM_SALT_SIZE].clone() + salt;
+
+            // constrain to match the expected value
+            let expected = meta.query_advice(cfg.scratch_space[4], Rotation::cur());
+            let sel = meta.query_selector(cfg.selector_add_label_sum_salt);
             vec![sel * (sum - expected)]
         });
 
@@ -467,10 +486,14 @@ impl Circuit<F> for AuthDecodeCircuit {
                 let label_sum_salted = self.add_salt(
                     label_sum,
                     assigned_label_sum_salt,
+                    LABEL_SUM_SALT_SIZE,
                     &mut region,
                     &cfg,
                     offset,
                 )?;
+                // activate the gate which performs the actual constraining
+                cfg.selector_add_label_sum_salt
+                    .enable(&mut region, offset)?;
                 offset += 1;
 
                 // Constrains each chunks of 4 limbs to be equal to a cell and
@@ -492,10 +515,15 @@ impl Circuit<F> for AuthDecodeCircuit {
                 let last_with_salt = self.add_salt(
                     plaintext[pt_len - 1].clone(),
                     assigned_plaintext_salt,
+                    PLAINTEXT_SALT_SIZE,
                     &mut region,
                     &cfg,
                     offset,
                 )?;
+                // activate the gate which performs the actual constraining
+                cfg.selector_add_plaintext_salt
+                    .enable(&mut region, offset)?;
+
                 // uncomment if we need to do more computations in the scratch space
                 // offset += 1;
 
@@ -690,6 +718,7 @@ impl AuthDecodeCircuit {
         &self,
         cell: AssignedCell<F, F>,
         salt: AssignedCell<F, F>,
+        salt_size: usize,
         region: &mut Region<F>,
         config: &TopLevelConfig,
         row_offset: usize,
@@ -700,13 +729,10 @@ impl AuthDecodeCircuit {
 
         // compute the expected sum and put it into the 5th cell
         let two = BigUint::from(2u8);
-        let pow_2_salt = bigint_to_f(&two.pow(SALT_SIZE as u32));
+        let pow_2_salt = bigint_to_f(&two.pow(salt_size as u32));
         let sum = cell.value() * Value::known(pow_2_salt) + salt.value();
         let assigned_sum =
             region.assign_advice(|| "", config.scratch_space[4], row_offset, || sum)?;
-
-        // activate the gate which performs the actual constraining
-        config.selector_add_salt.enable(region, row_offset)?;
 
         Ok(assigned_sum)
     }

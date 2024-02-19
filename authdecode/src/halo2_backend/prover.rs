@@ -1,4 +1,6 @@
-use super::circuit::{AuthDecodeCircuit, SALT_SIZE, TOTAL_FIELD_ELEMENTS};
+use super::circuit::{
+    AuthDecodeCircuit, LABEL_SUM_SALT_SIZE, PLAINTEXT_SALT_SIZE, TOTAL_FIELD_ELEMENTS,
+};
 use super::poseidon::{poseidon_1, poseidon_15};
 use super::utils::{bigint_to_f, deltas_to_matrices, f_to_bigint};
 use super::{CHUNK_SIZE, USEFUL_BITS};
@@ -107,8 +109,12 @@ impl Prove for Prover {
         1
     }
 
-    fn salt_size(&self) -> usize {
-        SALT_SIZE
+    fn plaintext_salt_size(&self) -> usize {
+        PLAINTEXT_SALT_SIZE
+    }
+
+    fn label_sum_salt_size(&self) -> usize {
+        LABEL_SUM_SALT_SIZE
     }
 
     fn chunk_size(&self) -> usize {
@@ -297,8 +303,12 @@ mod tests {
             1
         }
 
-        fn salt_size(&self) -> usize {
-            SALT_SIZE
+        fn plaintext_salt_size(&self) -> usize {
+            PLAINTEXT_SALT_SIZE
+        }
+
+        fn label_sum_salt_size(&self) -> usize {
+            LABEL_SUM_SALT_SIZE
         }
 
         fn chunk_size(&self) -> usize {

@@ -76,7 +76,7 @@ pub trait Verify {
     fn useful_bits(&self) -> usize;
 
     /// How many bits of [Plaintext] can fit into one [Chunk]. This does not
-    /// include the [Salt] of the hash - which takes up the remaining least bits
+    /// include the [PlaintextSalt] of the hash - which takes up the remaining least bits
     /// of the last field element of each chunk.
     fn chunk_size(&self) -> usize;
 }

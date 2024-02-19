@@ -158,9 +158,9 @@ pub struct ProofCreation {
 impl State for ProofCreation {}
 
 pub trait Prove {
-    /// Given the `input` to the AuthDecode zk circuit, returns a serialized zk
-    /// proof which can be passed to the Verifier.
-    fn prove(&self, input: ProofInput) -> Result<Proof, ProverError>;
+    /// Given a vector of `input` to the AuthDecode zk circuit, returns a vector of serialized zk
+    /// proofs which can be passed to the Verifier.
+    fn prove(&self, inputs: Vec<ProofInput>) -> Result<Vec<Proof>, ProverError>;
 
     /// Returns how many bits of plaintext we will pack into one field element.
     /// Normally, this should be [crate::verifier::Verify::field_size] minus 1.
@@ -548,11 +548,10 @@ impl AuthDecodeProver<ProofCreation> {
     /// Creates zk proofs of label decoding for each chunk of plaintext.
     /// Returns serialized proofs and salts.
     pub fn create_zk_proofs(self) -> Result<(Vec<Proof>, Vec<PlaintextSalt>), ProverError> {
-        let proofs = self
-            .create_zkproof_inputs(&self.state.zero_sums, self.state.deltas.clone())
-            .iter()
-            .map(|i| self.prover.prove(i.clone()))
-            .collect::<Result<Vec<_>, _>>()?;
+        let proof_inputs = self
+            .create_zkproof_inputs(&self.state.zero_sums, self.state.deltas.clone());
+            
+        let proofs = self.prover.prove(proof_inputs)?;
 
         Ok((proofs, self.state.plaintext_salts))
     }
@@ -561,13 +560,8 @@ impl AuthDecodeProver<ProofCreation> {
     fn create_zkproof_inputs(
         &self,
         zero_sum: &[ZeroSum],
-        mut deltas: Vec<Delta>,
+        deltas: Vec<Delta>,
     ) -> Vec<ProofInput> {
-        // Since the last chunk is padded with zero plaintext, we also zero-pad
-        // the corresponding deltas of the last chunk.
-        let delta_pad_count = self.prover.chunk_size() * self.state.chunks.len() - deltas.len();
-        deltas.extend(vec![Delta::from(0u8); delta_pad_count]);
-
         // we will have as many chunks of deltas as there are chunks of plaintext
         let chunks_of_deltas: Vec<Vec<Delta>> = deltas
             .chunks(self.prover.chunk_size())
@@ -600,8 +594,8 @@ mod tests {
     /// The prover who implements `Prove` with the correct values
     struct CorrectTestProver {}
     impl Prove for CorrectTestProver {
-        fn prove(&self, _: ProofInput) -> Result<Proof, ProverError> {
-            Ok(Proof::default())
+        fn prove(&self, _: Vec<ProofInput>) -> Result<Vec<Proof>, ProverError> {
+            Ok(vec![Proof::default()])
         }
 
         fn useful_bits(&self) -> usize {
@@ -650,8 +644,8 @@ mod tests {
     fn test_error_no_room_for_salt() {
         struct TestProver {}
         impl Prove for TestProver {
-            fn prove(&self, _input: ProofInput) -> Result<Proof, ProverError> {
-                Ok(Proof::default())
+            fn prove(&self, _: Vec<ProofInput>) -> Result<Vec<Proof>, ProverError> {
+                Ok(vec![Proof::default()])
             }
 
             fn useful_bits(&self) -> usize {
@@ -699,8 +693,8 @@ mod tests {
     fn test_error_max_chunk_size_exceeded() {
         struct TestProver {}
         impl Prove for TestProver {
-            fn prove(&self, _input: ProofInput) -> Result<Proof, ProverError> {
-                Ok(Proof::default())
+            fn prove(&self, _: Vec<ProofInput>) -> Result<Vec<Proof>, ProverError> {
+                Ok(vec![Proof::default()])
             }
 
             fn useful_bits(&self) -> usize {
@@ -748,8 +742,8 @@ mod tests {
     fn test_error_wrong_field_element_count() {
         struct TestProver {}
         impl Prove for TestProver {
-            fn prove(&self, _input: ProofInput) -> Result<Proof, ProverError> {
-                Ok(Proof::default())
+            fn prove(&self, _: Vec<ProofInput>) -> Result<Vec<Proof>, ProverError> {
+                Ok(vec![Proof::default()])
             }
 
             fn useful_bits(&self) -> usize {
@@ -811,8 +805,8 @@ mod tests {
     fn test_error_error_in_poseidon_implementation() {
         struct TestProver {}
         impl Prove for TestProver {
-            fn prove(&self, _input: ProofInput) -> Result<Proof, ProverError> {
-                Ok(Proof::default())
+            fn prove(&self, _: Vec<ProofInput>) -> Result<Vec<Proof>, ProverError> {
+                Ok(vec![Proof::default()])
             }
 
             fn useful_bits(&self) -> usize {
@@ -940,7 +934,7 @@ mod tests {
     fn test_error_proving_backend_error() {
         struct TestProver {}
         impl Prove for TestProver {
-            fn prove(&self, _input: ProofInput) -> Result<Proof, ProverError> {
+            fn prove(&self, _: Vec<ProofInput>) -> Result<Vec<Proof>, ProverError> {
                 Err(ProverError::ProvingBackendError)
             }
 
@@ -974,7 +968,7 @@ mod tests {
         }
 
         let lsp = AuthDecodeProver::new(Plaintext::default(), Box::new(TestProver {}));
-        let res = lsp.prover.prove(ProofInput::default());
+        let res = lsp.prover.prove(vec![ProofInput::default()]);
 
         assert_eq!(res.err().unwrap(), ProverError::ProvingBackendError);
     }

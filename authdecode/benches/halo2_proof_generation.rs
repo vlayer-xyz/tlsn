@@ -12,7 +12,7 @@ use std::time::Duration;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("halo2_benchmark_group");
-    group.measurement_time(Duration::from_secs(22));
+    group.measurement_time(Duration::from_secs(25));
 
     // benchmarking single threaded halo2
     env::set_var("RAYON_NUM_THREADS", "1");

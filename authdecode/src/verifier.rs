@@ -63,9 +63,9 @@ pub struct VerifyMany {
 impl State for VerifyMany {}
 
 pub trait Verify {
-    /// Verifies the zk proof against public `input`s. Returns `true` on success,
+    /// Verifies the zk proofs against public `input`s. Returns `true` on success,
     /// `false` otherwise.
-    fn verify(&self, input: VerificationInput) -> Result<bool, VerifierError>;
+    fn verify(&self, inputs: Vec<VerificationInput>) -> Result<bool, VerifierError>;
 
     /// The EC field size in bits. Verifier uses this to sanitize the `BigUint`s
     /// received from Prover.
@@ -215,14 +215,12 @@ impl AuthDecodeVerifier<VerifyMany> {
         proofs: Vec<Proof>,
     ) -> Result<(bool, Vec<PlaintextHash>), VerifierError> {
         let inputs = self.create_verification_inputs(proofs)?;
-        for input in inputs {
-            let res = self.verifier.verify(input)?;
-            if !res {
-                // we will never get here since "?" takes care of the
-                // verification error. Still, it is good to have this check
-                // just in case.
-                return Err(VerifierError::VerificationFailed);
-            }
+        let res = self.verifier.verify(inputs)?;
+        if !res {
+            // we will never get here since "?" takes care of the
+            // verification error. Still, it is good to have this check
+            // just in case.
+            return Err(VerifierError::VerificationFailed);
         }
         Ok((true, self.state.plaintext_hashes))
     }
@@ -242,12 +240,7 @@ impl AuthDecodeVerifier<VerifyMany> {
             return Err(VerifierError::WrongProofCount(chunk_count, proofs.len()));
         }
 
-        // Since the last chunk of plaintext is padded with zero bits, we also zero-pad
-        // the corresponding deltas of the last chunk to the size of a chunk.
-        let delta_pad_count = self.verifier.chunk_size() * chunk_count - self.state.deltas.len();
-        let mut deltas = self.state.deltas.clone();
-        deltas.extend(vec![0u8.into(); delta_pad_count]);
-
+        let deltas = self.state.deltas.clone();
         let chunks_of_deltas = deltas
             .chunks(self.verifier.chunk_size())
             .map(|i| i.to_vec())
@@ -280,7 +273,7 @@ mod tests {
     /// The verifier who implements `Verify` with the correct values
     struct CorrectTestVerifier {}
     impl Verify for CorrectTestVerifier {
-        fn verify(&self, _input: VerificationInput) -> Result<bool, VerifierError> {
+        fn verify(&self, _input: Vec<VerificationInput>) -> Result<bool, VerifierError> {
             Ok(true)
         }
 
@@ -363,7 +356,7 @@ mod tests {
     fn test_error_verification_failed() {
         struct TestVerifier {}
         impl Verify for TestVerifier {
-            fn verify(&self, _input: VerificationInput) -> Result<bool, VerifierError> {
+            fn verify(&self, _input: Vec<VerificationInput>) -> Result<bool, VerifierError> {
                 Ok(false)
             }
 
@@ -400,7 +393,7 @@ mod tests {
     fn test_verification_error() {
         struct TestVerifier {}
         impl Verify for TestVerifier {
-            fn verify(&self, _input: VerificationInput) -> Result<bool, VerifierError> {
+            fn verify(&self, _input: Vec<VerificationInput>) -> Result<bool, VerifierError> {
                 Err(VerifierError::VerifyingBackendError)
             }
 

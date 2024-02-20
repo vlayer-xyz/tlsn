@@ -366,7 +366,7 @@ mod tests {
     }
 
     impl Verify for TestHalo2Verifier {
-        fn verify(&self, _: VerificationInput) -> Result<bool, VerifierError> {
+        fn verify(&self, _: Vec<VerificationInput>) -> Result<bool, VerifierError> {
             Ok(false)
         }
 

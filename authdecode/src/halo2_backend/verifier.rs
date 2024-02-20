@@ -33,42 +33,50 @@ impl Verifier {
 }
 
 impl Verify for Verifier {
-    fn verify(&self, input: VerificationInput) -> Result<bool, VerifierError> {
+    fn verify(&self, inputs: Vec<VerificationInput>) -> Result<bool, VerifierError> {
         let params = &self.verification_key.params;
         let vk = &self.verification_key.key;
 
-        let strategy = SingleVerifier::new(params);
-        let proof = input.proof;
-        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+        let inputs_len = inputs.len();
+        for (i, mut input) in inputs.into_iter().enumerate() {
+            let strategy = SingleVerifier::new(params);
+            let proof = input.proof;
+            let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
 
-        // convert deltas into a matrix which halo2 expects
-        let (_, deltas_as_columns) = deltas_to_matrices(&input.deltas, self.useful_bits());
+            // Since the last chunk of plaintext is padded with zero bits, we also zero-pad
+            // the corresponding deltas of the last chunk to the size of a chunk.
+            if i == inputs_len - 1 && input.deltas.len() < self.chunk_size() {    
+                let delta_pad_count = self.chunk_size() - input.deltas.len();
+                input.deltas.extend(vec![0u8.into(); delta_pad_count]);
+            }
+            // convert deltas into a matrix which halo2 expects
+            let (_, deltas_as_columns) = deltas_to_matrices(&input.deltas, self.useful_bits());
 
-        let mut all_inputs: Vec<&[F]> = deltas_as_columns.iter().map(|v| v.as_slice()).collect();
+            let mut all_inputs: Vec<&[F]> = deltas_as_columns.iter().map(|v| v.as_slice()).collect();
 
-        // add another column with public inputs
-        let tmp = &[
-            bigint_to_f(&input.plaintext_hash),
-            bigint_to_f(&input.label_sum_hash),
-            bigint_to_f(&input.sum_of_zero_labels),
-        ];
-        all_inputs.push(tmp);
+            // add another column with public inputs
+            let tmp = &[
+                bigint_to_f(&input.plaintext_hash),
+                bigint_to_f(&input.label_sum_hash),
+                bigint_to_f(&input.sum_of_zero_labels),
+            ];
+            all_inputs.push(tmp);
 
-        // let now = Instant::now();
-        // perform the actual verification
-        let res = plonk::verify_proof(
-            params,
-            vk,
-            strategy,
-            &[all_inputs.as_slice()],
-            &mut transcript,
-        );
-        // println!("Proof verified [{:?}]", now.elapsed());
-        if res.is_err() {
-            Err(VerifierError::VerificationFailed)
-        } else {
-            Ok(true)
+            // let now = Instant::now();
+            // perform the actual verification
+            let res = plonk::verify_proof(
+                params,
+                vk,
+                strategy,
+                &[all_inputs.as_slice()],
+                &mut transcript,
+            );
+            // println!("Proof verified [{:?}]", now.elapsed());
+            if res.is_err() {
+                return Err(VerifierError::VerificationFailed);
+            }
         }
+        Ok(true)
     }
 
     fn field_size(&self) -> usize {

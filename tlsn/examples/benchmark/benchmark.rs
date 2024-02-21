@@ -1,63 +1,41 @@
-/// This example shows how to notarize Twitter DMs.
-///
-/// The example uses the notary server implemented in ../../../notary-server
-use eyre::Result;
-use futures::AsyncWriteExt;
-use hyper::{body::to_bytes, client::conn::Parts, Body, Request, StatusCode};
-use rustls::{Certificate, ClientConfig, RootCertStore};
-use serde::{Deserialize, Serialize};
-use std::{fs::File as StdFile, io::BufReader, ops::Range, sync::Arc};
-use tokio::{fs::File, io::AsyncWriteExt as _, net::TcpStream};
-use tokio_rustls::TlsConnector;
-use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
+// This example shows how to notarize Twitter DMs.
+//
+// The example uses the notary server implemented in ../../../notary-server
+
+use http_body_util::{BodyExt, Empty};
+use hyper::{body::Bytes, Request, StatusCode};
+use hyper_util::rt::TokioIo;
+use std::{env, str};
 use tls_server_fixture::{CA_CERT_DER, SERVER_DOMAIN};
+use tlsn_core::{commitment::CommitmentKind, proof::TlsProof};
+use tlsn_examples::request_notarization;
+use tokio::io::AsyncWriteExt as _;
+use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 use tracing::{debug, info};
 
 use tlsn_prover::tls::{Prover, ProverConfig};
 
+// Setting of the application server
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
 // Setting of the notary server — make sure these are the same with those in ../../../notary-server
 const NOTARY_HOST: &str = "127.0.0.1";
 const NOTARY_PORT: u16 = 7047;
-const NOTARY_CA_CERT_PATH: &str = "../../../notary-server/fixture/tls/rootCA.crt";
 
 // Configuration of notarization
 // 65536 -> frame size too big
 const NOTARY_MAX_TRANSCRIPT_SIZE: usize = 49152;
 const NUM_LOOPS: u8 = 20;
-const DATA_SIZE: u8 = 16;  // KB
-
-/// Response object of the /session API
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NotarizationSessionResponse {
-    pub session_id: String,
-}
-
-/// Request object of the /session API
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NotarizationSessionRequest {
-    pub client_type: ClientType,
-    /// Maximum transcript size in bytes
-    pub max_transcript_size: Option<usize>,
-}
-
-/// Types of client that the prover is using
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ClientType {
-    /// Client that has access to the transport layer
-    Tcp,
-    /// Client that cannot directly access transport layer, e.g. browser extension
-    Websocket,
-}
+const DATA_SIZE: u8 = 1; // KB
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    info!("Starting benchmarking: data_size = {} KB, num_loops = {}", DATA_SIZE, NUM_LOOPS);
+    info!(
+        "Starting benchmarking: data_size = {} KB, num_loops = {}",
+        DATA_SIZE, NUM_LOOPS
+    );
 
     let mut runtimes = Vec::new();
 
@@ -77,18 +55,18 @@ async fn main() {
     }
     info!("runtimes: {:?}", runtimes);
     info!("Average: {:?}", total / NUM_LOOPS as u32);
-
-
 }
 
 async fn notarize() {
     // time
+    let (notary_tls_socket, session_id) =
+        request_notarization(NOTARY_HOST, NOTARY_PORT, Some(NOTARY_MAX_TRANSCRIPT_SIZE)).await;
 
-    let (notary_tls_socket, session_id) = setup_notary_connection().await;
     let mut root_store = tls_core::anchors::RootCertStore::empty();
     root_store
         .add(&tls_core::key::Certificate(CA_CERT_DER.to_vec()))
         .unwrap();
+
     // Basic default prover config using the session_id returned from /session endpoint just now
     let config = ProverConfig::builder()
         .id(session_id)
@@ -110,20 +88,24 @@ async fn notarize() {
 
     // Bind the Prover to server connection
     let (tls_connection, prover_fut) = prover.connect(client_socket.compat()).await.unwrap();
+    let tls_connection = TokioIo::new(tls_connection.compat());
+
+    // Grab a control handle to the Prover
+    let prover_ctrl = prover_fut.control();
 
     // Spawn the Prover to be run concurrently
     let prover_task = tokio::spawn(prover_fut);
 
     // Attach the hyper HTTP client to the TLS connection
-    let (mut request_sender, connection) = hyper::client::conn::handshake(tls_connection.compat())
+    let (mut request_sender, connection) = hyper::client::conn::http1::handshake(tls_connection)
         .await
         .unwrap();
 
     // Spawn the HTTP task to be run concurrently
-    let connection_task = tokio::spawn(connection.without_shutdown());
+    tokio::spawn(connection);
 
     // Build the HTTP request to fetch the DMs
-    let url = format!("https://{SERVER_DOMAIN}/formats/json?size={DATA_SIZE}");
+    let url: String = format!("https://{SERVER_DOMAIN}/formats/json?size={DATA_SIZE}");
     let request = Request::builder()
         .uri(url)
         .header("Host", SERVER_DOMAIN)
@@ -131,54 +113,39 @@ async fn notarize() {
         .header("Accept-Encoding", "identity")
         .header("Connection", "close")
         .header("User-Agent", USER_AGENT)
-        .body(Body::empty())
+        .body(Empty::<Bytes>::new())
         .unwrap();
 
     debug!("Sending request");
+
+    // Because we don't need to decrypt the response right away, we can defer decryption
+    // until after the connection is closed. This will speed up the proving process!
+    prover_ctrl.defer_decryption().await.unwrap();
 
     let response = request_sender.send_request(request).await.unwrap();
 
     debug!("Sent request");
 
-    assert!(response.status() == StatusCode::OK);
+    assert!(response.status() == StatusCode::OK, "{}", response.status());
 
     debug!("Request OK");
 
     // Pretty printing :)
-    let payload = to_bytes(response.into_body()).await.unwrap().to_vec();
+    let payload = response.into_body().collect().await.unwrap().to_bytes();
     let parsed =
         serde_json::from_str::<serde_json::Value>(&String::from_utf8_lossy(&payload)).unwrap();
     debug!("{}", serde_json::to_string_pretty(&parsed).unwrap());
 
-    // Close the connection to the server
-    let mut client_socket = connection_task.await.unwrap().unwrap().io.into_inner();
-    client_socket.close().await.unwrap();
-
     // The Prover task should be done now, so we can grab it.
     let prover = prover_task.await.unwrap().unwrap();
 
-    // Prepare for notarization
-    let mut prover = prover.start_notarize();
+    // Upgrade the prover to an HTTP prover, and start notarization.
+    let mut prover = prover.to_http().unwrap().start_notarize();
 
-    // Identify the ranges in the transcript that contain secrets
-    let (public_ranges, private_ranges) = find_ranges(
-        prover.sent_transcript().data(),
-        &[],
-    );
+    // Commit to the transcript with the default committer, which will commit using BLAKE3.
+    prover.commit().unwrap();
 
-    let recv_len = prover.recv_transcript().data().len();
-
-    let builder = prover.commitment_builder();
-
-    // Commit to the outbound transcript, isolating the data that contain secrets
-    for range in public_ranges.iter().chain(private_ranges.iter()) {
-        builder.commit_sent(range.clone()).unwrap();
-    }
-
-    // Commit to the full received transcript in one shot, as we don't need to redact anything
-    builder.commit_recv(0..recv_len).unwrap();
-
-    // Finalize, returning the notarized session
+    // Finalize, returning the notarized HTTP session
     let notarized_session = prover.finalize().await.unwrap();
 
     debug!("Notarization complete!");
@@ -186,159 +153,61 @@ async fn notarize() {
     // Dump the notarized session to a file
     let mut file = tokio::fs::File::create("twitter_dm.json").await.unwrap();
     file.write_all(
-        serde_json::to_string_pretty(&notarized_session)
+        serde_json::to_string_pretty(notarized_session.session())
             .unwrap()
             .as_bytes(),
     )
     .await
     .unwrap();
-}
 
-async fn setup_notary_connection() -> (tokio_rustls::client::TlsStream<TcpStream>, String) {
-    // Connect to the Notary via TLS-TCP
-    let mut certificate_file_reader = read_pem_file(NOTARY_CA_CERT_PATH).await.unwrap();
-    let mut certificates: Vec<Certificate> = rustls_pemfile::certs(&mut certificate_file_reader)
-        .unwrap()
-        .into_iter()
-        .map(Certificate)
-        .collect();
-    let certificate = certificates.remove(0);
+    let session_proof = notarized_session.session_proof();
 
-    let mut root_store = RootCertStore::empty();
-    root_store.add(&certificate).unwrap();
+    let mut proof_builder = notarized_session.session().data().build_substrings_proof();
 
-    let client_notary_config = ClientConfig::builder()
-        .with_safe_defaults()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-    let notary_connector = TlsConnector::from(Arc::new(client_notary_config));
+    // Prove the request, while redacting the secrets from it.
+    let request = &notarized_session.transcript().requests[0];
 
-    let notary_socket = tokio::net::TcpStream::connect((NOTARY_HOST, NOTARY_PORT))
-        .await
+    proof_builder
+        .reveal_sent(&request.without_data(), CommitmentKind::Blake3)
         .unwrap();
 
-    let notary_tls_socket = notary_connector
-        // Require the domain name of notary server to be the same as that in the server cert
-        .connect("tlsnotaryserver.io".try_into().unwrap(), notary_socket)
-        .await
+    proof_builder
+        .reveal_sent(&request.request.target, CommitmentKind::Blake3)
         .unwrap();
 
-    // Attach the hyper HTTP client to the notary TLS connection to send request to the /session endpoint to configure notarization and obtain session id
-    let (mut request_sender, connection) = hyper::client::conn::handshake(notary_tls_socket)
-        .await
-        .unwrap();
-
-    // Spawn the HTTP task to be run concurrently
-    let connection_task = tokio::spawn(connection.without_shutdown());
-
-    // Build the HTTP request to configure notarization
-    let payload = serde_json::to_string(&NotarizationSessionRequest {
-        client_type: ClientType::Tcp,
-        max_transcript_size: Some(NOTARY_MAX_TRANSCRIPT_SIZE),
-    })
-    .unwrap();
-
-    let request = Request::builder()
-        .uri(format!("https://{NOTARY_HOST}:{NOTARY_PORT}/session"))
-        .method("POST")
-        .header("Host", NOTARY_HOST)
-        // Need to specify application/json for axum to parse it as json
-        .header("Content-Type", "application/json")
-        .body(Body::from(payload))
-        .unwrap();
-
-    debug!("Sending configuration request");
-
-    let configuration_response = request_sender.send_request(request).await.unwrap();
-
-    debug!("Sent configuration request");
-
-    assert!(configuration_response.status() == StatusCode::OK);
-
-    debug!("Response OK");
-
-    // Pretty printing :)
-    let payload = to_bytes(configuration_response.into_body())
-        .await
-        .unwrap()
-        .to_vec();
-    let notarization_response =
-        serde_json::from_str::<NotarizationSessionResponse>(&String::from_utf8_lossy(&payload))
-            .unwrap();
-
-    debug!("Notarization response: {:?}", notarization_response,);
-
-    // Send notarization request via HTTP, where the underlying TCP connection will be extracted later
-    let request = Request::builder()
-        // Need to specify the session_id so that notary server knows the right configuration to use
-        // as the configuration is set in the previous HTTP call
-        .uri(format!(
-            "https://{}:{}/notarize?sessionId={}",
-            NOTARY_HOST,
-            NOTARY_PORT,
-            notarization_response.session_id.clone()
-        ))
-        .method("GET")
-        .header("Host", NOTARY_HOST)
-        .header("Connection", "Upgrade")
-        // Need to specify this upgrade header for server to extract tcp connection later
-        .header("Upgrade", "TCP")
-        .body(Body::empty())
-        .unwrap();
-
-    debug!("Sending notarization request");
-
-    let response = request_sender.send_request(request).await.unwrap();
-
-    debug!("Sent notarization request");
-
-    assert!(response.status() == StatusCode::SWITCHING_PROTOCOLS);
-
-    debug!("Switched protocol OK");
-
-    // Claim back the TLS socket after HTTP exchange is done
-    let Parts {
-        io: notary_tls_socket,
-        ..
-    } = connection_task.await.unwrap().unwrap();
-
-    (notary_tls_socket, notarization_response.session_id)
-}
-
-/// Find the ranges of the public and private parts of a sequence.
-///
-/// Returns a tuple of `(public, private)` ranges.
-fn find_ranges(seq: &[u8], sub_seq: &[&[u8]]) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
-    let mut private_ranges = Vec::new();
-    for s in sub_seq {
-        for (idx, w) in seq.windows(s.len()).enumerate() {
-            if w == *s {
-                private_ranges.push(idx..(idx + w.len()));
-            }
+    for header in &request.headers {
+        // Only reveal the host header
+        if header.name.as_str().eq_ignore_ascii_case("Host") {
+            proof_builder
+                .reveal_sent(header, CommitmentKind::Blake3)
+                .unwrap();
+        } else {
+            proof_builder
+                .reveal_sent(&header.without_value(), CommitmentKind::Blake3)
+                .unwrap();
         }
     }
 
-    let mut sorted_ranges = private_ranges.clone();
-    sorted_ranges.sort_by_key(|r| r.start);
+    // Prove the entire response, as we don't need to redact anything
+    let response = &notarized_session.transcript().responses[0];
 
-    let mut public_ranges = Vec::new();
-    let mut last_end = 0;
-    for r in sorted_ranges {
-        if r.start > last_end {
-            public_ranges.push(last_end..r.start);
-        }
-        last_end = r.end;
-    }
+    proof_builder
+        .reveal_recv(response, CommitmentKind::Blake3)
+        .unwrap();
 
-    if last_end < seq.len() {
-        public_ranges.push(last_end..seq.len());
-    }
+    // Build the proof
+    let substrings_proof = proof_builder.build().unwrap();
 
-    (public_ranges, private_ranges)
-}
+    let proof = TlsProof {
+        session: session_proof,
+        substrings: substrings_proof,
+    };
 
-/// Read a PEM-formatted file and return its buffer reader
-async fn read_pem_file(file_path: &str) -> Result<BufReader<StdFile>> {
-    let key_file = File::open(file_path).await?.into_std().await;
-    Ok(BufReader::new(key_file))
+    // Dump the proof to a file.
+    let mut file = tokio::fs::File::create("twitter_dm_proof.json")
+        .await
+        .unwrap();
+    file.write_all(serde_json::to_string_pretty(&proof).unwrap().as_bytes())
+        .await
+        .unwrap();
 }

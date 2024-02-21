@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+tls-server-fixture = {path = "../../components/tls/tls-server-fixture"}
 tlsn-core.workspace = true
 tlsn-tls-core.workspace = true
 tlsn-tls-client.workspace = true
@@ -56,6 +57,10 @@ path = "simple/simple_verifier.rs"
 [[example]]
 name = "twitter_dm"
 path = "twitter/twitter_dm.rs"
+
+[[example]]
+name = "benchmark"
+path = "benchmark/benchmark.rs"
 
 [[example]]
 name = "discord_dm"

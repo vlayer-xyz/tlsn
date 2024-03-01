@@ -45,14 +45,15 @@ impl Verify for Verifier {
 
             // Since the last chunk of plaintext is padded with zero bits, we also zero-pad
             // the corresponding deltas of the last chunk to the size of a chunk.
-            if i == inputs_len - 1 && input.deltas.len() < self.chunk_size() {    
+            if i == inputs_len - 1 && input.deltas.len() < self.chunk_size() {
                 let delta_pad_count = self.chunk_size() - input.deltas.len();
                 input.deltas.extend(vec![0u8.into(); delta_pad_count]);
             }
             // convert deltas into a matrix which halo2 expects
             let (_, deltas_as_columns) = deltas_to_matrices(&input.deltas, self.useful_bits());
 
-            let mut all_inputs: Vec<&[F]> = deltas_as_columns.iter().map(|v| v.as_slice()).collect();
+            let mut all_inputs: Vec<&[F]> =
+                deltas_as_columns.iter().map(|v| v.as_slice()).collect();
 
             // add another column with public inputs
             let tmp = &[

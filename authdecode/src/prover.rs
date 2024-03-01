@@ -548,20 +548,16 @@ impl AuthDecodeProver<ProofCreation> {
     /// Creates zk proofs of label decoding for each chunk of plaintext.
     /// Returns serialized proofs and salts.
     pub fn create_zk_proofs(self) -> Result<(Vec<Proof>, Vec<PlaintextSalt>), ProverError> {
-        let proof_inputs = self
-            .create_zkproof_inputs(&self.state.zero_sums, self.state.deltas.clone());
-            
+        let proof_inputs =
+            self.create_zkproof_inputs(&self.state.zero_sums, self.state.deltas.clone());
+
         let proofs = self.prover.prove(proof_inputs)?;
 
         Ok((proofs, self.state.plaintext_salts))
     }
 
     /// Returns [ProofInput]s for each [Chunk].
-    fn create_zkproof_inputs(
-        &self,
-        zero_sum: &[ZeroSum],
-        deltas: Vec<Delta>,
-    ) -> Vec<ProofInput> {
+    fn create_zkproof_inputs(&self, zero_sum: &[ZeroSum], deltas: Vec<Delta>) -> Vec<ProofInput> {
         // we will have as many chunks of deltas as there are chunks of plaintext
         let chunks_of_deltas: Vec<Vec<Delta>> = deltas
             .chunks(self.prover.chunk_size())

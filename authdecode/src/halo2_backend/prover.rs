@@ -34,14 +34,13 @@ impl Prove for Prover {
         let mut proofs = vec![];
         let input_count = inputs.len();
         for (i, mut input) in inputs.into_iter().enumerate() {
-            if input.plaintext.len() != TOTAL_FIELD_ELEMENTS
-            {
+            if input.plaintext.len() != TOTAL_FIELD_ELEMENTS {
                 // this can only be caused by an error in
                 // `crate::prover::AuthDecodeProver` logic
                 return Err(ProverError::InternalError);
             }
             if input.deltas.len() != self.chunk_size() {
-                if  i == input_count - 1 && input.deltas.len() < self.chunk_size() {
+                if i == input_count - 1 && input.deltas.len() < self.chunk_size() {
                     // Since the last chunk of plaintext is padded with zero, we also zero-pad
                     // the corresponding deltas of the last chunk.
                     let delta_pad_count = self.chunk_size() - input.deltas.len();
@@ -67,7 +66,8 @@ impl Prove for Prover {
                 .unwrap();
 
             // arrange into the format which halo2 expects
-            let mut all_inputs: Vec<&[F]> = deltas_as_columns.iter().map(|v| v.as_slice()).collect();
+            let mut all_inputs: Vec<&[F]> =
+                deltas_as_columns.iter().map(|v| v.as_slice()).collect();
 
             // add another column with public inputs
             let tmp = &[
@@ -204,7 +204,7 @@ mod tests {
         fn prove(&self, inputs: Vec<ProofInput>) -> Result<Vec<Proof>, ProverError> {
             let input_count = inputs.len();
             for (i, mut input) in inputs.into_iter().enumerate() {
-                if  i == input_count - 1 && input.deltas.len() < self.chunk_size() {
+                if i == input_count - 1 && input.deltas.len() < self.chunk_size() {
                     // Since the last chunk is padded with zero plaintext, we also zero-pad
                     // the corresponding deltas of the last chunk.
                     let delta_pad_count = self.chunk_size() - input.deltas.len();
@@ -212,7 +212,7 @@ mod tests {
                 }
                 // convert into matrices
                 let (deltas_as_rows, deltas_as_columns) =
-                deltas_to_matrices(&input.deltas, self.useful_bits());
+                    deltas_to_matrices(&input.deltas, self.useful_bits());
 
                 // convert plaintext into F type
                 let good_plaintext: [F; TOTAL_FIELD_ELEMENTS] = input

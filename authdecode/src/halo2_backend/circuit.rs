@@ -2,7 +2,7 @@ use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Region, SimpleFloorPlanner, Value},
     plonk::{
         Advice, Circuit, Column, ConstraintSystem, Constraints, Error, Expression, Instance,
-        Selector,
+        Selector, TableColumn,
     },
     poly::Rotation,
 };
@@ -12,7 +12,10 @@ use std::convert::TryInto;
 
 use super::poseidon::circuit_config::{configure_poseidon_rate_1, configure_poseidon_rate_15};
 use super::poseidon::spec::{Spec1, Spec15};
-use halo2_gadgets::poseidon::{primitives::ConstantLength, Hash, Pow5Chip, Pow5Config};
+use halo2_gadgets::{
+    poseidon::{primitives::ConstantLength, Hash, Pow5Chip, Pow5Config},
+    utilities::lookup_range_check::LookupRangeCheckConfig,
+};
 use num::BigUint;
 
 use super::utils::{bigint_to_256bits, bigint_to_f, bits_to_limbs, f_to_bigint};
@@ -52,6 +55,13 @@ pub const FULL_FIELD_ELEMENTS: usize = 14;
 /// The parameter informing halo2 about the upper bound of how many rows our
 /// circuit uses. This is a power of 2.
 pub const K: u32 = 6;
+
+/// The parameter used in lookup range check for salt to ensure salt is within certain range X (e.g. PLAINTEXT_SALT_SIZE)
+/// halo2 lookup does this by decomposing the salt into multiple limbs of size LOOKUP_RANGE_CHECK_K
+/// which each limb is verified to be within the table column that contains all the values < 2^LOOKUP_RANGE_CHECK_K-1
+/// For more details, refer https://docs.rs/halo2_gadgets/latest/halo2_gadgets/utilities/lookup_range_check/struct.LookupRangeCheckConfig.html#method.configure
+/// This should be K (defined above) - 1 so that our circuit column can fit all values < 2^LOOKUP_RANGE_CHECK_K-1
+pub const LOOKUP_RANGE_CHECK_K: usize = 5;
 
 /// For one row of the circuit, this is the amount of advice cells to put
 /// plaintext bits into and also this is the amount of instance cells to
@@ -123,6 +133,11 @@ pub struct TopLevelConfig {
     poseidon_config_rate15: Pow5Config<Fp, 16, 15>,
     /// config for Poseidon with rate 1
     poseidon_config_rate1: Pow5Config<Fp, 2, 1>,
+
+    /// Config for lookup range check of salts
+    /// Requires 1 extra advice column and 1 table column
+    lookup_range_check: LookupRangeCheckConfig<F, LOOKUP_RANGE_CHECK_K>,
+    lookup_table_column: TableColumn,
 
     /// Contains 3 public input in this order:
     /// [plaintext hash, label sum hash, zero sum].
@@ -232,6 +247,12 @@ impl Circuit<F> for AuthDecodeCircuit {
         let global_constants = meta.fixed_column();
         meta.enable_constant(global_constants);
 
+        // LOOKUP RANGE CHECK
+        let lookup_table_column = meta.lookup_table_column();
+        let lookup_advice_column = meta.advice_column();
+        let lookup_range_check =
+            LookupRangeCheckConfig::configure(meta, lookup_advice_column, lookup_table_column);
+
         // CONFIG
 
         // Put everything initialized above into a config
@@ -255,6 +276,9 @@ impl Circuit<F> for AuthDecodeCircuit {
 
             poseidon_config_rate15,
             poseidon_config_rate1,
+
+            lookup_range_check,
+            lookup_table_column,
 
             public_inputs,
         };
@@ -382,6 +406,22 @@ impl Circuit<F> for AuthDecodeCircuit {
 
     /// Creates the circuit
     fn synthesize(&self, cfg: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+        // Load the range check lookup table with bytes
+        self.load_lookup_range_check_table(&mut layouter, &cfg)?;
+        // Range check the salts to make sure they are not bigger than their respective salt size
+        self.range_check_salt(
+            &mut layouter,
+            &cfg,
+            self.label_sum_salt,
+            LABEL_SUM_SALT_SIZE,
+        )?;
+        self.range_check_salt(
+            &mut layouter,
+            &cfg,
+            self.plaintext_salt,
+            PLAINTEXT_SALT_SIZE,
+        )?;
+
         let (label_sum, plaintext) = layouter.assign_region(
             || "main",
             |mut region| {
@@ -389,7 +429,7 @@ impl Circuit<F> for AuthDecodeCircuit {
                 let mut assigned_dot_products = Vec::new();
                 // limb for each row
                 let mut assigned_limbs = Vec::new();
-                //salt
+                // salt
                 let assigned_plaintext_salt = region.assign_advice(
                     || "",
                     cfg.salts,
@@ -735,6 +775,71 @@ impl AuthDecodeCircuit {
             region.assign_advice(|| "", config.scratch_space[4], row_offset, || sum)?;
 
         Ok(assigned_sum)
+    }
+
+    // Loads the values [0..2^LOOKUP_RANGE_CHECK_K) into `lookup_table` for lookup range check
+    // Patterned after [halo2_gadgets::utilities::lookup_range_check::load]
+    fn load_lookup_range_check_table(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        config: &TopLevelConfig,
+    ) -> Result<(), Error> {
+        layouter.assign_table(
+            || "lookup_range_check_table",
+            |mut table| {
+                // We generate the row values lazily (we only need them during keygen).
+                for index in 0..(1 << LOOKUP_RANGE_CHECK_K) {
+                    table.assign_cell(
+                        || "lookup_range_check_table",
+                        config.lookup_table_column,
+                        index,
+                        || Value::known(F::from(index as u64)),
+                    )?;
+                }
+                Ok(())
+            },
+        )
+    }
+
+    // Range check the salts to make sure they are not bigger than their respective salt size
+    // Refer [LOOKUP_RANGE_CHECK_K] defined above for more details
+    fn range_check_salt(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        config: &TopLevelConfig,
+        salt: F,
+        salt_size_limit: usize,
+    ) -> Result<(), Error> {
+        // e.g. salt_size_limit = 128 bits; LOOKUP_RANGE_CHECK_K = 5; num_of_limbs = 25, extra_bits = 3
+        // e.g. salt_size_limit = 125 bits; LOOKUP_RANGE_CHECK_K = 5; num_of_limbs = 25, extra_bits = 0
+        let num_of_limbs = salt_size_limit / LOOKUP_RANGE_CHECK_K;
+        let extra_bits = salt_size_limit % LOOKUP_RANGE_CHECK_K;
+
+        // salt_zs will be a vector of decompose running sums (https://docs.rs/halo2_gadgets/latest/halo2_gadgets/utilities/decompose_running_sum/index.html)
+        let salt_zs = config.lookup_range_check.witness_check(
+            layouter.namespace(|| "range check salt lower bits"),
+            Value::known(salt),
+            num_of_limbs,
+            false, // we don't need to force salt to be less than 2^(num_of_limbs * LOOKUP_RANGE_CHECK_K), since we might have extra_bits available
+        )?;
+
+        // if length of salt_zs is num_of_limbs + 1, this can mean either
+        // (1) salt is of 2^(num_of_limbs * LOOKUP_RANGE_CHECK_K)-1 size, and salt_zs[num_of_limbs] == 0
+        // (2) salt is bigger than 2^(num_of_limbs * LOOKUP_RANGE_CHECK_K)-1 by some delta, where salt_zs[num_of_limbs] == delta
+        //
+        // we need to make sure delta is < 2^extra bits
+        // (P/S: extra_bits can be 0 if LOOKUP_RANGE_CHECK_K is a multiple of salt_size_limit)
+        //
+        // for (1), the check below will always pass regardless of extra_bits value as delta == 0
+        // for (2), the check below will ensure that delta is < 2^extra bits
+        if salt_zs.len() == num_of_limbs + 1 {
+            config.lookup_range_check.copy_short_check(
+                layouter.namespace(|| "range check salt upper bits"),
+                salt_zs[num_of_limbs].clone(),
+                extra_bits,
+            )?;
+        }
+        Ok(())
     }
 }
 

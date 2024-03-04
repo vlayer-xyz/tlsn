@@ -1,4 +1,4 @@
-use super::{rate15_params, rate1_params};
+use super::{rate15_params, rate1_params, rate2_params};
 use group::ff::Field;
 use halo2_gadgets::poseidon::primitives::Spec;
 use pasta_curves::pallas::Base as F;
@@ -74,6 +74,43 @@ impl Spec<F, 2, 1> for Spec1 {
             rate1_params::ROUND_CONSTANTS[..].to_vec(),
             rate1_params::MDS,
             rate1_params::MDS_INV,
+        )
+    }
+}
+
+/// Spec for rate 2 Poseidon which halo2 uses both inside
+/// the zk circuit and in the clear.
+///
+/// Compare it to the spec which zcash uses:
+/// [halo2_gadgets::poseidon::primitives::P128Pow5T3]
+#[derive(Debug)]
+pub struct Spec2;
+
+impl Spec<F, 3, 2> for Spec2 {
+    fn full_rounds() -> usize {
+        8
+    }
+
+    fn partial_rounds() -> usize {
+        // Taken from https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom
+        // (see "var N_ROUNDS_P[16]"), where they use 57 partial rounds for 2-rate Poseidon.
+        // TODO: investigate why setting this > 56 gives errors.
+        56
+    }
+
+    fn sbox(val: F) -> F {
+        val.pow_vartime([5])
+    }
+
+    fn secure_mds() -> usize {
+        unimplemented!()
+    }
+
+    fn constants() -> (Vec<[F; 3]>, Mds<F, 3>, Mds<F, 3>) {
+        (
+            rate2_params::ROUND_CONSTANTS[..].to_vec(),
+            rate2_params::MDS,
+            rate2_params::MDS_INV,
         )
     }
 }

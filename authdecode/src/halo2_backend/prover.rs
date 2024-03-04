@@ -1,7 +1,7 @@
 use super::circuit::{
     AuthDecodeCircuit, LABEL_SUM_SALT_SIZE, PLAINTEXT_SALT_SIZE, TOTAL_FIELD_ELEMENTS,
 };
-use super::poseidon::{poseidon_1, poseidon_15};
+use super::poseidon::{poseidon_1, poseidon_15, poseidon_2};
 use super::utils::{bigint_to_f, deltas_to_matrices, f_to_bigint};
 use super::{CHUNK_SIZE, USEFUL_BITS};
 use crate::prover::{ProofInput, Prove, ProverError};
@@ -162,7 +162,17 @@ fn hash_internal(inputs: &[BigUint]) -> Result<BigUint, ProverError> {
                 .try_into()
                 .unwrap();
             poseidon_15(&fes)
-        }
+        },
+        2 => {
+            // hash with rate-2 Poseidon
+            let fes: [F; 2] = inputs
+                .iter()
+                .map(bigint_to_f)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap();
+            poseidon_2(&fes)
+        },
         1 => {
             // hash with rate-1 Poseidon
             let fes: [F; 1] = inputs
@@ -246,7 +256,11 @@ mod tests {
                 // Expect successful verification.
 
                 let prover = MockProver::run(K, &circuit, good_inputs.clone()).unwrap();
-                assert!(prover.verify().is_ok());
+                let res = prover.verify();
+                if let Err(err) = res {
+                    err.iter().for_each(|e| eprintln!("{}", e));
+                    panic!()
+                }
 
                 // Find one delta which corresponds to plaintext bit 1 and corrupt
                 // the delta:

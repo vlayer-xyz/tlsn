@@ -39,7 +39,7 @@ fn main() {
     let plaintext_salt = Default::default();
     let label_sum_salt = Default::default();
     let plaintext = Default::default();
-    let deltas = [[Default::default(); 64]; 58];
+    let deltas = [[Default::default(); 64]; 56];
     let circuit = AuthDecodeCircuit::new(plaintext, plaintext_salt, label_sum_salt, deltas);
 
     let command = DebugCli::from_args();

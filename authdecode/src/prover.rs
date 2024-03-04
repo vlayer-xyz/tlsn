@@ -322,7 +322,9 @@ impl AuthDecodeProver<PlaintextCommitment> {
             .iter()
             .zip(salts.iter())
             .map(|(chunk, salt)| {
-                let salted_chunk = self.salt_chunk(chunk, salt)?;
+                // let salted_chunk = self.salt_chunk(chunk, salt)?;
+                let mut salted_chunk = chunk.clone();
+                salted_chunk.push(salt.clone());
                 self.prover.hash(&salted_chunk)
             })
             .collect()
@@ -381,9 +383,9 @@ impl AuthDecodeProver<LabelSumCommitment> {
                 // | leading zeroes | sum |       salt        |
                 //                         \                 /
                 //                          \    low bits   /
-                let salted_sum = sum.shl(self.prover.label_sum_salt_size()) + salt;
+                // let salted_sum = sum.shl(self.prover.label_sum_salt_size()) + salt;
 
-                self.prover.hash(&[salted_sum])
+                self.prover.hash(&[sum.clone(), salt])
             })
             .collect();
         if res.is_err() {
@@ -599,7 +601,7 @@ mod tests {
         }
 
         fn poseidon_rate(&self) -> usize {
-            15
+            14
         }
 
         fn permutation_count(&self) -> usize {
@@ -607,7 +609,7 @@ mod tests {
         }
 
         fn plaintext_salt_size(&self) -> usize {
-            125
+            128
         }
 
         fn label_sum_salt_size(&self) -> usize {
@@ -615,7 +617,7 @@ mod tests {
         }
 
         fn chunk_size(&self) -> usize {
-            3670
+            3542
         }
 
         fn hash(&self, _: &[BigUint]) -> Result<BigUint, ProverError> {
@@ -649,7 +651,7 @@ mod tests {
             }
 
             fn poseidon_rate(&self) -> usize {
-                15
+                14
             }
 
             fn permutation_count(&self) -> usize {
@@ -657,7 +659,7 @@ mod tests {
             }
 
             fn plaintext_salt_size(&self) -> usize {
-                125
+                128
             }
 
             fn label_sum_salt_size(&self) -> usize {
@@ -665,7 +667,7 @@ mod tests {
             }
 
             fn chunk_size(&self) -> usize {
-                3670
+                3542
             }
 
             fn hash(&self, _inputs: &[BigUint]) -> Result<BigUint, ProverError> {
@@ -698,7 +700,7 @@ mod tests {
             }
 
             fn poseidon_rate(&self) -> usize {
-                15
+                14
             }
 
             fn permutation_count(&self) -> usize {
@@ -706,7 +708,7 @@ mod tests {
             }
 
             fn plaintext_salt_size(&self) -> usize {
-                125
+                128
             }
 
             fn label_sum_salt_size(&self) -> usize {
@@ -714,7 +716,7 @@ mod tests {
             }
 
             fn chunk_size(&self) -> usize {
-                super::MAX_CHUNK_SIZE + 1 //changed from 3670
+                super::MAX_CHUNK_SIZE + 1 //changed from 3542
             }
 
             fn hash(&self, _inputs: &[BigUint]) -> Result<BigUint, ProverError> {
@@ -747,7 +749,7 @@ mod tests {
             }
 
             fn poseidon_rate(&self) -> usize {
-                14 //changed from 15
+                13 //changed from 15
             }
 
             fn permutation_count(&self) -> usize {
@@ -755,7 +757,7 @@ mod tests {
             }
 
             fn plaintext_salt_size(&self) -> usize {
-                125
+                128
             }
 
             fn label_sum_salt_size(&self) -> usize {
@@ -763,7 +765,7 @@ mod tests {
             }
 
             fn chunk_size(&self) -> usize {
-                3670
+                3542
             }
 
             fn hash(&self, _inputs: &[BigUint]) -> Result<BigUint, ProverError> {
@@ -810,7 +812,7 @@ mod tests {
             }
 
             fn poseidon_rate(&self) -> usize {
-                15
+                14
             }
 
             fn permutation_count(&self) -> usize {
@@ -818,7 +820,7 @@ mod tests {
             }
 
             fn plaintext_salt_size(&self) -> usize {
-                125
+                128
             }
 
             fn label_sum_salt_size(&self) -> usize {
@@ -826,7 +828,7 @@ mod tests {
             }
 
             fn chunk_size(&self) -> usize {
-                3670
+                3542
             }
 
             fn hash(&self, _inputs: &[BigUint]) -> Result<BigUint, ProverError> {
@@ -939,7 +941,7 @@ mod tests {
             }
 
             fn poseidon_rate(&self) -> usize {
-                15
+                14
             }
 
             fn permutation_count(&self) -> usize {
@@ -947,7 +949,7 @@ mod tests {
             }
 
             fn plaintext_salt_size(&self) -> usize {
-                125
+                128
             }
 
             fn label_sum_salt_size(&self) -> usize {
@@ -955,7 +957,7 @@ mod tests {
             }
 
             fn chunk_size(&self) -> usize {
-                3670
+                3542
             }
 
             fn hash(&self, _inputs: &[BigUint]) -> Result<BigUint, ProverError> {

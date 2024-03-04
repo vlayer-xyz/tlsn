@@ -286,7 +286,7 @@ mod tests {
         }
 
         fn chunk_size(&self) -> usize {
-            3670
+            3542
         }
     }
 
@@ -326,7 +326,7 @@ mod tests {
         // 3 chunks
         let lsv = AuthDecodeVerifier {
             state: VerifyMany {
-                deltas: vec![0u8.into(); 3670 * 2 + 1],
+                deltas: vec![0u8.into(); 3542 * 2 + 1],
                 ..Default::default()
             },
             verifier: Box::new(CorrectTestVerifier {}),
@@ -339,7 +339,7 @@ mod tests {
         // 3 chunks
         let lsv = AuthDecodeVerifier {
             state: VerifyMany {
-                deltas: vec![0u8.into(); 3670 * 2 + 1],
+                deltas: vec![0u8.into(); 3542 * 2 + 1],
                 ..Default::default()
             },
             verifier: Box::new(CorrectTestVerifier {}),
@@ -369,13 +369,13 @@ mod tests {
             }
 
             fn chunk_size(&self) -> usize {
-                3670
+                3542
             }
         }
 
         let lsv = AuthDecodeVerifier {
             state: VerifyMany {
-                deltas: vec![0u8.into(); 3670 * 2 - 1],
+                deltas: vec![0u8.into(); 3542 * 2 - 1],
                 zero_sums: vec![0u8.into(); 2],
                 plaintext_hashes: vec![0u8.into(); 2],
                 label_sum_hashes: vec![0u8.into(); 2],
@@ -406,13 +406,13 @@ mod tests {
             }
 
             fn chunk_size(&self) -> usize {
-                3670
+                3542
             }
         }
 
         let lsv = AuthDecodeVerifier {
             state: VerifyMany {
-                deltas: vec![0u8.into(); 3670 * 2 - 1],
+                deltas: vec![0u8.into(); 3542 * 2 - 1],
                 zero_sums: vec![0u8.into(); 2],
                 plaintext_hashes: vec![0u8.into(); 2],
                 label_sum_hashes: vec![0u8.into(); 2],

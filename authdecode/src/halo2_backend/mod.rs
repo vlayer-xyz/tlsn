@@ -12,9 +12,9 @@ pub const USEFUL_BITS: usize = 253;
 
 /// The size of the chunk, see [crate::prover::Prove::chunk_size].
 /// We use 14 field elements of 253 bits and 128 bits of the 15th field
-/// element: 14 * 253 + 128 == 3670 bits total. The low 125 bits
+/// element: 14 * 253 + 128 == 3542 bits total. The low 125 bits
 /// of the last field element will be used for the salt.
-pub const CHUNK_SIZE: usize = 3670;
+pub const CHUNK_SIZE: usize = 3542;
 
 /// The elliptic curve on which the Poseidon hash will be computed.
 pub enum Curve {

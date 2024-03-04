@@ -10,7 +10,7 @@ use pasta_curves::pallas;
 use pasta_curves::Fp;
 use std::convert::TryInto;
 
-use super::poseidon::circuit_config::{configure_poseidon_rate_1, configure_poseidon_rate_15};
+use super::poseidon::{circuit_config::{configure_poseidon_rate_1, configure_poseidon_rate_15, configure_poseidon_rate_2}, spec::Spec2};
 use super::poseidon::spec::{Spec1, Spec15};
 use halo2_gadgets::{
     poseidon::{primitives::ConstantLength, Hash, Pow5Chip, Pow5Config},
@@ -44,7 +44,7 @@ use super::utils::{bigint_to_256bits, bigint_to_f, bits_to_limbs, f_to_bigint};
 // But compared to 64 columns, that would increase the prover time 2x.
 
 /// The total amount of field elements that will be decoded and hashed.
-pub const TOTAL_FIELD_ELEMENTS: usize = 15;
+pub const TOTAL_FIELD_ELEMENTS: usize = 14;
 
 /// The amount of "full" field elements. We fully pack the plaintext bits
 /// into these field elements.
@@ -74,7 +74,7 @@ pub const CELLS_PER_ROW: usize = 64;
 /// that the circuit can use is 2^K - 6 = 58.
 /// If we ever change K, we should re-compute the number of reserved rows with
 /// (cs.blinding_factors() + 1)
-pub const USEFUL_ROWS: usize = 58;
+pub const USEFUL_ROWS: usize = 56;
 
 /// The size of the salt of the plaintext hash in bits.
 ///
@@ -82,7 +82,7 @@ pub const USEFUL_ROWS: usize = 58;
 /// limbs of plaintext into the field element (which has 253 useful bits, see
 /// [super::USEFUL_BITS]) and use the remaining 125 bits of the field element
 /// for the salt (see [crate::Salt]).
-pub const PLAINTEXT_SALT_SIZE: usize = 125;
+pub const PLAINTEXT_SALT_SIZE: usize = 128;
 
 /// The size of the salt of the label sum hash in bits.
 pub const LABEL_SUM_SALT_SIZE: usize = 128;
@@ -125,14 +125,14 @@ pub struct TopLevelConfig {
     /// Sums 2 cells
     selector_sum2: Selector,
     /// Left-shifts the first cell by the size of the plaintext salt and adds the salt
-    selector_add_plaintext_salt: Selector,
+    // selector_add_plaintext_salt: Selector,
     /// Left-shifts the first cell by the size of the label sum salt and adds the salt
-    selector_add_label_sum_salt: Selector,
+    // selector_add_label_sum_salt: Selector,
 
     /// config for Poseidon with rate 15
     poseidon_config_rate15: Pow5Config<Fp, 16, 15>,
     /// config for Poseidon with rate 1
-    poseidon_config_rate1: Pow5Config<Fp, 2, 1>,
+    poseidon_config_rate2: Pow5Config<Fp, 3, 2>,
 
     /// Config for lookup range check of salts
     /// Requires 1 extra advice column and 1 table column
@@ -235,13 +235,13 @@ impl Circuit<F> for AuthDecodeCircuit {
             .unwrap();
         let selector_sum4 = meta.selector();
         let selector_sum2 = meta.selector();
-        let selector_add_plaintext_salt = meta.selector();
-        let selector_add_label_sum_salt = meta.selector();
+        // let selector_add_plaintext_salt = meta.selector();
+        // let selector_add_label_sum_salt = meta.selector();
 
         // POSEIDON
 
         let poseidon_config_rate15 = configure_poseidon_rate_15::<Spec15>(15, meta);
-        let poseidon_config_rate1 = configure_poseidon_rate_1::<Spec1>(1, meta);
+        let poseidon_config_rate2 = configure_poseidon_rate_2::<Spec2>(2, meta);
         // we need to designate one column for global constants which the Poseidon
         // chip uses
         let global_constants = meta.fixed_column();
@@ -271,11 +271,11 @@ impl Circuit<F> for AuthDecodeCircuit {
             selector_binary_check,
             selector_sum4,
             selector_sum2,
-            selector_add_plaintext_salt,
-            selector_add_label_sum_salt,
+            // selector_add_plaintext_salt,
+            // selector_add_label_sum_salt,
 
             poseidon_config_rate15,
-            poseidon_config_rate1,
+            poseidon_config_rate2,
 
             lookup_range_check,
             lookup_table_column,
@@ -378,28 +378,28 @@ impl Circuit<F> for AuthDecodeCircuit {
         });
 
         // left-shifts the first cell by PLAINTEXT_SALT_SIZE and adds the second cell (the salt)
-        meta.create_gate("add plaintext salt", |meta| {
-            let cell = meta.query_advice(cfg.scratch_space[0], Rotation::cur());
-            let salt = meta.query_advice(cfg.scratch_space[1], Rotation::cur());
-            let sum = cell * pow_2_x[PLAINTEXT_SALT_SIZE].clone() + salt;
+        // meta.create_gate("add plaintext salt", |meta| {
+        //     let cell = meta.query_advice(cfg.scratch_space[0], Rotation::cur());
+        //     let salt = meta.query_advice(cfg.scratch_space[1], Rotation::cur());
+        //     let sum = cell * pow_2_x[PLAINTEXT_SALT_SIZE].clone() + salt;
 
-            // constrain to match the expected value
-            let expected = meta.query_advice(cfg.scratch_space[4], Rotation::cur());
-            let sel = meta.query_selector(cfg.selector_add_plaintext_salt);
-            vec![sel * (sum - expected)]
-        });
+        //     // constrain to match the expected value
+        //     let expected = meta.query_advice(cfg.scratch_space[4], Rotation::cur());
+        //     let sel = meta.query_selector(cfg.selector_add_plaintext_salt);
+        //     vec![sel * (sum - expected)]
+        // });
 
         // left-shifts the first cell by LABEL_SUM_SALT_SIZE and adds the second cell (the salt)
-        meta.create_gate("add label sum salt", |meta| {
-            let cell = meta.query_advice(cfg.scratch_space[0], Rotation::cur());
-            let salt = meta.query_advice(cfg.scratch_space[1], Rotation::cur());
-            let sum = cell * pow_2_x[LABEL_SUM_SALT_SIZE].clone() + salt;
+        // meta.create_gate("add label sum salt", |meta| {
+        //     let cell = meta.query_advice(cfg.scratch_space[0], Rotation::cur());
+        //     let salt = meta.query_advice(cfg.scratch_space[1], Rotation::cur());
+        //     let sum = cell * pow_2_x[LABEL_SUM_SALT_SIZE].clone() + salt;
 
-            // constrain to match the expected value
-            let expected = meta.query_advice(cfg.scratch_space[4], Rotation::cur());
-            let sel = meta.query_selector(cfg.selector_add_label_sum_salt);
-            vec![sel * (sum - expected)]
-        });
+        //     // constrain to match the expected value
+        //     let expected = meta.query_advice(cfg.scratch_space[4], Rotation::cur());
+        //     let sel = meta.query_selector(cfg.selector_add_label_sum_salt);
+        //     vec![sel * (sum - expected)]
+        // });
 
         cfg
     }
@@ -407,20 +407,20 @@ impl Circuit<F> for AuthDecodeCircuit {
     /// Creates the circuit
     fn synthesize(&self, cfg: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
         // Load the range check lookup table with bytes
-        self.load_lookup_range_check_table(&mut layouter, &cfg)?;
+        // self.load_lookup_range_check_table(&mut layouter, &cfg)?;
         // Range check the salts to make sure they are not bigger than their respective salt size
-        self.range_check_salt(
-            &mut layouter,
-            &cfg,
-            self.label_sum_salt,
-            LABEL_SUM_SALT_SIZE,
-        )?;
-        self.range_check_salt(
-            &mut layouter,
-            &cfg,
-            self.plaintext_salt,
-            PLAINTEXT_SALT_SIZE,
-        )?;
+        // self.range_check_salt(
+        //     &mut layouter,
+        //     &cfg,
+        //     self.label_sum_salt,
+        //     LABEL_SUM_SALT_SIZE,
+        // )?;
+        // self.range_check_salt(
+        //     &mut layouter,
+        //     &cfg,
+        //     self.plaintext_salt,
+        //     PLAINTEXT_SALT_SIZE,
+        // )?;
 
         let (label_sum, plaintext) = layouter.assign_region(
             || "main",
@@ -443,15 +443,15 @@ impl Circuit<F> for AuthDecodeCircuit {
                     || Value::known(self.label_sum_salt),
                 )?;
 
-                for j in 0..FULL_FIELD_ELEMENTS + 1 {
+                for j in 0..FULL_FIELD_ELEMENTS {
                     // decompose the private field element into bits
                     let bits = bigint_to_256bits(f_to_bigint(&self.plaintext[j].clone()));
 
                     // The last field element consists of only 2 64-bit limbs,
                     // so we use 2 rows for its bits and we skip processing the
                     // 2 high limbs
-                    let max_row = if j == FULL_FIELD_ELEMENTS { 2 } else { 4 };
-                    let skip = if j == FULL_FIELD_ELEMENTS { 2 } else { 0 };
+                    let max_row = 4;
+                    // let skip = if j == FULL_FIELD_ELEMENTS { 2 } else { 0 };
 
                     for row in 0..max_row {
                         // convert bits into field elements and put them on the same row
@@ -460,7 +460,7 @@ impl Circuit<F> for AuthDecodeCircuit {
                                 || "",
                                 cfg.bits[i],
                                 j * 4 + row,
-                                || Value::known(F::from(bits[CELLS_PER_ROW * (row + skip) + i])),
+                                || Value::known(F::from(bits[CELLS_PER_ROW * (row) + i])),
                             )?;
                         }
                         // constrain the whole row of bits to be binary
@@ -472,17 +472,17 @@ impl Circuit<F> for AuthDecodeCircuit {
                             || "",
                             cfg.expected_limbs,
                             j * 4 + row,
-                            || Value::known(bigint_to_f(&limbs[row + skip].clone())),
+                            || Value::known(bigint_to_f(&limbs[row].clone())),
                         )?);
                         // constrain the expected limb to match what the gate
                         // composes from bits
-                        cfg.selector_compose[row + skip].enable(&mut region, j * 4 + row)?;
+                        cfg.selector_compose[row].enable(&mut region, j * 4 + row)?;
 
                         // compute the expected dot product for this row
                         let mut dot_product = F::from(0);
                         for i in 0..CELLS_PER_ROW {
                             dot_product += self.deltas[j * 4 + row][i]
-                                * F::from(bits[CELLS_PER_ROW * (row + skip) + i]);
+                                * F::from(bits[CELLS_PER_ROW * (row) + i]);
                         }
 
                         // place it into a cell for the expected dot_product
@@ -523,18 +523,19 @@ impl Circuit<F> for AuthDecodeCircuit {
                 offset += 1;
 
                 // add salt
-                let label_sum_salted = self.add_salt(
-                    label_sum,
-                    assigned_label_sum_salt,
-                    LABEL_SUM_SALT_SIZE,
-                    &mut region,
-                    &cfg,
-                    offset,
-                )?;
+                // let label_sum_salted = self.add_salt(
+                //     label_sum,
+                //     assigned_label_sum_salt,
+                //     LABEL_SUM_SALT_SIZE,
+                //     &mut region,
+                //     &cfg,
+                //     offset,
+                // )?;
                 // activate the gate which performs the actual constraining
-                cfg.selector_add_label_sum_salt
-                    .enable(&mut region, offset)?;
-                offset += 1;
+                // cfg.selector_add_label_sum_salt
+                //     .enable(&mut region, offset)?;
+                // offset += 1;
+                let label_sum_salted = vec![label_sum, assigned_label_sum_salt];
 
                 // Constrains each chunks of 4 limbs to be equal to a cell and
                 // returns the constrained cells containing the original plaintext
@@ -551,24 +552,25 @@ impl Circuit<F> for AuthDecodeCircuit {
                 let mut plaintext = plaintext?;
 
                 // add salt to the last field element of the plaintext
-                let pt_len = plaintext.len();
-                let last_with_salt = self.add_salt(
-                    plaintext[pt_len - 1].clone(),
-                    assigned_plaintext_salt,
-                    PLAINTEXT_SALT_SIZE,
-                    &mut region,
-                    &cfg,
-                    offset,
-                )?;
+                // let pt_len = plaintext.len();
+                // let last_with_salt = self.add_salt(
+                //     plaintext[pt_len - 1].clone(),
+                //     assigned_plaintext_salt,
+                //     PLAINTEXT_SALT_SIZE,
+                //     &mut region,
+                //     &cfg,
+                //     offset,
+                // )?;
                 // activate the gate which performs the actual constraining
-                cfg.selector_add_plaintext_salt
-                    .enable(&mut region, offset)?;
+                // cfg.selector_add_plaintext_salt
+                //     .enable(&mut region, offset)?;
+                plaintext.push(assigned_plaintext_salt);
 
                 // uncomment if we need to do more computations in the scratch space
                 // offset += 1;
 
                 // replace the last field element with the one with salt
-                plaintext[pt_len - 1] = last_with_salt;
+                // plaintext[pt_len - 1] = last_with_salt;
 
                 //println!("{:?} final `scratch_space` offset", offset);
                 Ok((label_sum_salted, plaintext))
@@ -577,13 +579,13 @@ impl Circuit<F> for AuthDecodeCircuit {
 
         // Hash the label sum and constrain the digest to match the public input
 
-        let chip = Pow5Chip::construct(cfg.poseidon_config_rate1.clone());
+        let chip = Pow5Chip::construct(cfg.poseidon_config_rate2.clone());
 
-        let hasher = Hash::<F, _, Spec1, ConstantLength<1>, 2, 1>::init(
+        let hasher = Hash::<F, _, Spec2, ConstantLength<2>, 3, 2>::init(
             chip,
             layouter.namespace(|| "init"),
         )?;
-        let output = hasher.hash(layouter.namespace(|| "hash"), [label_sum])?;
+        let output = hasher.hash(layouter.namespace(|| "hash"), label_sum.try_into().unwrap(),)?;
 
         layouter.assign_region(
             || "constrain output",
@@ -632,7 +634,7 @@ impl Circuit<F> for AuthDecodeCircuit {
 
 impl AuthDecodeCircuit {
     pub fn new(
-        plaintext: [F; 15],
+        plaintext: [F; 14],
         plaintext_salt: F,
         label_sum_salt: F,
         deltas: [[F; CELLS_PER_ROW]; USEFUL_ROWS],
@@ -651,7 +653,7 @@ impl AuthDecodeCircuit {
     // the resulting cell is a properly constrained sum.
     fn compute_58_cell_sum(
         &self,
-        cells: &[AssignedCell<Fp, Fp>; 58],
+        cells: &[AssignedCell<Fp, Fp>; 56],
         region: &mut Region<F>,
         config: &TopLevelConfig,
         row_offset: usize,
@@ -664,9 +666,9 @@ impl AuthDecodeCircuit {
 
         // do not process the last chunk of level1 as it will be
         // later combined with the last chunk of level2
-        let l2_sums = self.fold_sum(&l1_chunks[..l1_chunks.len() - 1], region, config, offset)?;
+        let l2_sums = self.fold_sum(&l1_chunks, region, config, offset)?;
 
-        offset += l1_chunks.len() - 1;
+        offset += l1_chunks.len();
 
         // we now have 14 level-2 subsums which need to be summed with each
         // other in batches of 4. There are 2 subsums from level 1 which we
@@ -677,24 +679,23 @@ impl AuthDecodeCircuit {
 
         // do not process the last chunk as it will be combined with
         // level1's last chunk's sums
-        let mut l3_sums =
-            self.fold_sum(&l2_chunks[..l2_chunks.len() - 1], region, config, offset)?;
-
-        offset += l2_chunks.len() - 1;
+        // let mut l3_sums =
+        //     self.fold_sum(&l2_chunks[..l2_chunks.len() - 1], region, config, offset)?;
 
         // we need to find the sum of level1's last chunk's 2 elements and level2's
         // last chunks 2 elements
-        let chunk = [
-            l1_chunks[l1_chunks.len() - 1][0].clone(),
-            l1_chunks[l1_chunks.len() - 1][1].clone(),
-            l2_chunks[l2_chunks.len() - 1][0].clone(),
-            l2_chunks[l2_chunks.len() - 1][1].clone(),
-        ];
-        let sum = self.fold_sum(&[chunk.to_vec()], region, config, offset)?;
+        // let chunk = [
+        //     l1_chunks[l1_chunks.len() - 1][0].clone(),
+        //     l1_chunks[l1_chunks.len() - 1][1].clone(),
+        //     l2_chunks[l2_chunks.len() - 1][0].clone(),
+        //     l2_chunks[l2_chunks.len() - 1][1].clone(),
+        // ];
+        let l3_sums = self.fold_sum(&l2_chunks, region, config, offset)?;
+        offset += l2_chunks.len();
 
-        offset += 1;
+        // offset += 1;
 
-        l3_sums.push(sum[0].clone());
+        // l3_sums.push(sum[0].clone());
 
         // 4 level-3 subsums into the final level-4 sum which is the final
         // sum

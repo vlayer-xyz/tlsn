@@ -29,6 +29,7 @@ pub mod encodings;
 pub mod prover;
 pub mod utils;
 pub mod verifier;
+pub mod wasm;
 
 use crate::prover::prover::ProofInput;
 use num::BigInt;

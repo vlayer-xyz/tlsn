@@ -1,5 +1,3 @@
-use std::env;
-
 use num::BigUint;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha12Rng;
@@ -39,9 +37,6 @@ impl crate::prover::EncodingVerifier for DummyEncodingsVerifier {
 }
 
 fn create_prover_and_verifer() -> (Prover<ProofCreated>, Verifier<CommitmentReceived>, Vec<Vec<u8>>) {
-     // benchmarking single threaded halo2
-     env::set_var("RAYON_NUM_THREADS", "1");
-
     log!("Setting up...");
     let params = OneTimeSetup::params();
     let proving_key = OneTimeSetup::proving_key(params.clone());
@@ -101,11 +96,14 @@ fn create_prover_and_verifer() -> (Prover<ProofCreated>, Verifier<CommitmentRece
 #[wasm_bindgen]
 pub fn prove() {
     let _ = create_prover_and_verifer();
+    log!("Proofs generated!");
 }
 
 #[wasm_bindgen]
 pub fn verify() {
     let (_, verifier, proof_sets) = create_prover_and_verifer();
+    log!("Proofs generated!");
     log!("Verifier verifying proofs...");
     verifier.verify(proof_sets).unwrap();
+    log!("Proofs verified!");
 }

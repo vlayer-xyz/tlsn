@@ -28,5 +28,5 @@ The implementation of wasm prover and verifier code, together with the react app
 - Usage of `std::time` needs to be replaced or removed in rust codes, else browser will complain `time not implemented on this platform`
 - In [package.json](./package.json), `"ignorePatterns": ["wasm"]` needs to be defined to avoid eslint error on js files compiled from wasm
 - [config](./config/) and [scripts](./scripts/) are copied from [zordle](https://github.com/nalinbhardwaj/zordle) — they mainly handle bundling and building of the react app using webpack
-- To compile authdecode without wasm, one can run cargo with a your machine target, e.g. `cargo clippy --target aarch64-apple-darwin`
+- To compile authdecode without wasm, one can run cargo with your machine target, e.g. `cargo clippy --target aarch64-apple-darwin`
 - For VSCode rust-analyzer to work with wasm, insert the following in `.vscode/settings.json`: `"rust-analyzer.cargo.target": "wasm32-unknown-unknown"`

@@ -1,46 +1,39 @@
 import { expose } from 'comlink';
+import init, {
+    initThreadPool,
+    init_panic_hook,
+    prove,
+    verify,
+} from "./wasm/authdecode.js";
 
-const NUM_OF_THREAD = 1;
 
-async function prove() {
+const NUM_OF_THREAD = 4;
+
+export const setup = async () => {
+    console.log("Wasm setup called");
+    await init();
+    init_panic_hook();
+    await initThreadPool(NUM_OF_THREAD);
+}
+
+export const prover = () =>  {
     console.log('Prove called');
-    const {
-        default: init,
-        initThreadPool,
-        prove,
-        init_panic_hook
-    } = await import("./wasm/authdecode.js");
+    console.time("Proving latency");
+    prove();
+    console.timeEnd("Proving latency");
+};
 
-    await init();
-    await initThreadPool(NUM_OF_THREAD);
-    init_panic_hook();
-    
-    console.time("Proving starts");
-    await prove();
-    console.timeEnd("Proving ends");
-}
-
-async function verify() {
+export const verifier = () => {
     console.log('Verify called');
-    const {
-        default: init,
-        initThreadPool,
-        verify,
-        init_panic_hook
-    } = await import("./wasm/authdecode.js");
-
-    await init();
-    await initThreadPool(NUM_OF_THREAD);
-    init_panic_hook();
-    
-    console.time("Proving + verifying start");
-    await verify();
-    console.timeEnd("Proving + verifying ends");
-}
+    console.time("Proving + verifying latency");
+    verify();
+    console.timeEnd("Proving + verifying latency");
+};
 
 const exports = {
-    prove,
-    verify
+    setup,
+    prover,
+    verifier,
 };
 export type Halo2Worker = typeof exports;
 

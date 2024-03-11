@@ -19,7 +19,6 @@ use halo2_proofs::{
 };
 
 use rand::Rng;
-use std::time::Instant;
 
 use super::{
     circuit::{AuthDecodeCircuit, FIELD_ELEMENTS},
@@ -155,8 +154,6 @@ impl Backend for Prover {
                     deltas_as_rows,
                 );
 
-                let now = Instant::now();
-
                 let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
 
                 let res = plonk::create_proof::<
@@ -178,7 +175,6 @@ impl Backend for Prover {
                     return Err(ProverError::ProvingBackendError);
                 }
 
-                println!("Proof created in [{:?}]", now.elapsed());
                 let proof = transcript.finalize();
                 println!("Proof size [{} kB]", proof.len() as f64 / 1024.0);
                 Ok(proof)

@@ -1,24 +1,32 @@
 use num::BigUint;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha12Rng;
+
+#[cfg(target_family = "wasm")]
 use wasm_bindgen::prelude::*;
 
 use crate::{backend::halo2::{onetimesetup::OneTimeSetup, prover::Prover as Halo2Prover, verifier::Verifier as Halo2Verifier}, encodings::{Encoding, FullEncodings}, prover::{prover::Prover, state::ProofCreated, InitData}, utils::u8vec_to_boolvec, verifier::{state::CommitmentReceived, verifier::Verifier}};
 
+// Need this to control the number of thread in browser — configured from JS side
+#[cfg(target_family = "wasm")]
 pub use wasm_bindgen_rayon::init_thread_pool;
 
+#[cfg(target_family = "wasm")]
 extern crate console_error_panic_hook;
 
 /// The size of plaintext in bytes;
 const PLAINTEXT_SIZE: usize = 400;
 
 // A macro to provide `println!(..)`-style syntax for `console.log` logging.
+#[cfg(target_family = "wasm")]
 macro_rules! log {
     ( $( $t:tt )* ) => {
         web_sys::console::log_1(&format!( $( $t )* ).into());
     }
 }
 
+// To forward rust panic error to console.log in browser
+#[cfg(target_family = "wasm")]
 #[wasm_bindgen]
 pub fn init_panic_hook() {
     console_error_panic_hook::set_once();
@@ -36,8 +44,9 @@ impl crate::prover::EncodingVerifier for DummyEncodingsVerifier {
     }
 }
 
+#[cfg(target_family = "wasm")]
 fn create_prover_and_verifer() -> (Prover<ProofCreated>, Verifier<CommitmentReceived>, Vec<Vec<u8>>) {
-    log!("Setting up...");
+    // log!("Setting up...");
     let params = OneTimeSetup::params();
     let proving_key = OneTimeSetup::proving_key(params.clone());
     let verification_key = OneTimeSetup::verification_key(params);
@@ -70,10 +79,10 @@ fn create_prover_and_verifer() -> (Prover<ProofCreated>, Verifier<CommitmentRece
     // Prover's active encodings.
     let active_encodings = full_encodings.encode(&u8vec_to_boolvec(&plaintext));
 
-    log!("Prover committing plaintexts and encoding sum...");
+    // log!("Prover committing plaintexts and encoding sum...");
     let (prover, commitments) = prover.commit(vec![(plaintext, active_encodings)]).unwrap();
 
-    log!("Verifier sending full encodings...");
+    // log!("Verifier sending full encodings...");
     let (verifier, verification_data) = verifier
         .receive_commitments(
             commitments,
@@ -82,28 +91,30 @@ fn create_prover_and_verifer() -> (Prover<ProofCreated>, Verifier<CommitmentRece
         )
         .unwrap();
 
-    log!("Prover checking full encodings...");
+    // log!("Prover checking full encodings...");
     let prover = prover
         .check(verification_data, DummyEncodingsVerifier {})
         .unwrap();
 
-    log!("Prover generating proofs...");
+    // log!("Prover generating proofs...");
     let (prover, proof_sets) = prover.prove().unwrap();
 
     (prover, verifier, proof_sets)
 }
 
+#[cfg(target_family = "wasm")]
 #[wasm_bindgen]
 pub fn prove() {
     let _ = create_prover_and_verifer();
-    log!("Proofs generated!");
+    // log!("Proofs generated!");
 }
 
+#[cfg(target_family = "wasm")]
 #[wasm_bindgen]
 pub fn verify() {
     let (_, verifier, proof_sets) = create_prover_and_verifer();
-    log!("Proofs generated!");
-    log!("Verifier verifying proofs...");
+    // log!("Proofs generated!");
+    // log!("Verifier verifying proofs...");
     verifier.verify(proof_sets).unwrap();
-    log!("Proofs verified!");
+    // log!("Proofs verified!");
 }

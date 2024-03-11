@@ -10,23 +10,32 @@ function App() {
     });
     const workerApi = wrap<import('./halo2-worker').Halo2Worker>(worker);
 
-    async function prove() {
-        await workerApi.prove();
+    function prove() {
+        workerApi.prover();
     }
 
-    async function verify() {
-        await workerApi.verify();
+    function verify() {
+        workerApi.verifier();
     }
+
+    async function setup() {
+        await workerApi.setup();
+    }
+    // one time setup of the panic hook, thread pool
+    setup();
 
     return (
         <div className="App">
         <header className="App-header">
             <img src={logo} className="App-logo" alt="logo" />
-            <p>
-            Benchmark test for authdecode in browser
-            </p>
-            <button onClick={prove}>prove</button>
-            <button onClick={verify}>verify</button>
+            <h3>
+            Benchmarking Test for Authdecode in Browser 
+            </h3>
+            <p style={{ fontSize: '20px' }}>Open console log (where latency will be printed), then press either button below</p>
+            <div style={{}}>
+                <button className="big-button" style={{ marginRight: '50px' }} onClick={prove}>Prove</button>
+                <button className="big-button" onClick={verify}>Prove + Verify</button>
+            </div>
         </header>
         </div>
     );

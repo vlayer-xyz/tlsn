@@ -4,7 +4,6 @@ use crate::{
     verifier::{backend::Backend, error::VerifierError, verifier::VerificationInput},
     Proof,
 };
-use std::time::Instant;
 
 use ff::{FromUniformBytes, WithSmallOrderMulGroup};
 use halo2_proofs::{
@@ -74,7 +73,6 @@ impl Backend for Verifier {
             ];
             all_inputs.push(tmp);
 
-            let now = Instant::now();
             verify_proof::<
                 KZGCommitmentScheme<Bn256>,
                 VerifierGWC<'_, Bn256>,
@@ -82,7 +80,6 @@ impl Backend for Verifier {
                 Blake2bRead<_, _, Challenge255<_>>,
                 AccumulatorStrategy<_>,
             >(params, vk, &proof, &[all_inputs.as_slice()])?;
-            println!("Proof verified in [{:?}]", now.elapsed());
         }
 
         Ok(())

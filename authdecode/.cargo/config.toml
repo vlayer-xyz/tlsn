@@ -1,3 +1,5 @@
+# To bump up wasm memory to 4GB
+
 [target.wasm32-unknown-unknown]
 rustflags = [
     "-C",

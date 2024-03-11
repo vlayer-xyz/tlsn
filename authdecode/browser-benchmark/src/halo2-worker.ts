@@ -7,7 +7,7 @@ import init, {
 } from "./wasm/authdecode.js";
 
 
-const NUM_OF_THREAD = 4;
+const NUM_OF_THREAD = 1;
 
 export const setup = async () => {
     console.log("Wasm setup called");

@@ -7,6 +7,10 @@ edition = "2021"
 name = "authdecode"
 crate-type = ["cdylib", "rlib"]
 
+[[bench]]
+name = "native_benchmark"
+harness = false
+
 [dependencies]
 thiserror = "1.0.56"
 num = "0.4.1" 
@@ -24,6 +28,9 @@ halo2_poseidon = { git = "https://github.com/privacy-scaling-explorations/poseid
 
 group = "0.13"
 ff = "0.13"
+
+# Needed to replace std::time::Instant in wasm
+instant = { version = "0.1", features = [ "wasm-bindgen", "inaccurate"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 wasm-bindgen = { version = "0.2.87", features = ["serde-serialize"]}

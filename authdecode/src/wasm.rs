@@ -1,3 +1,4 @@
+use instant::Instant;
 use num::BigUint;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha12Rng;
@@ -17,11 +18,18 @@ extern crate console_error_panic_hook;
 /// The size of plaintext in bytes;
 const PLAINTEXT_SIZE: usize = 400;
 
-// A macro to provide `println!(..)`-style syntax for `console.log` logging.
-#[cfg(target_family = "wasm")]
+// A macro to provide `println!(..)`-style syntax for `console.log` logging when build target is wasm 
+#[macro_export]
 macro_rules! log {
     ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
+        #[cfg(target_family = "wasm")]
+        {
+            web_sys::console::log_1(&format!( $( $t )* ).into());
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            println!( $( $t )* )
+        }
     }
 }
 
@@ -97,7 +105,10 @@ fn create_prover_and_verifer() -> (Prover<ProofCreated>, Verifier<CommitmentRece
         .unwrap();
 
     // log!("Prover generating proofs...");
+    let now = Instant::now();
     let (prover, proof_sets) = prover.prove().unwrap();
+    let duration = now.elapsed();
+    log!("Proving done in {:?}", duration);
 
     (prover, verifier, proof_sets)
 }
@@ -113,8 +124,8 @@ pub fn prove() {
 #[wasm_bindgen]
 pub fn verify() {
     let (_, verifier, proof_sets) = create_prover_and_verifer();
-    // log!("Proofs generated!");
-    // log!("Verifier verifying proofs...");
+    let now = Instant::now();
     verifier.verify(proof_sets).unwrap();
-    // log!("Proofs verified!");
+    let duration = now.elapsed();
+    log!("Verifying done in {:?}", duration);
 }

@@ -1,8 +1,5 @@
 use crate::{
-    backend::halo2::{poseidon::poseidon_2, utils::biguint_to_f},
-    prover::{backend::Backend, error::ProverError},
-    utils::{bits_to_biguint, u8vec_to_boolvec},
-    Proof, ProofInput,
+    backend::halo2::{poseidon::poseidon_2, utils::biguint_to_f}, log, prover::{backend::Backend, error::ProverError}, utils::{bits_to_biguint, u8vec_to_boolvec}, Proof, ProofInput
 };
 use halo2_proofs::{
     halo2curves::bn256::{Bn256, Fr as F, G1Affine},
@@ -18,6 +15,7 @@ use halo2_proofs::{
     transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
 };
 
+use instant::Instant;
 use rand::Rng;
 
 use super::{
@@ -154,6 +152,8 @@ impl Backend for Prover {
                     deltas_as_rows,
                 );
 
+                let now = Instant::now();
+
                 let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
 
                 let res = plonk::create_proof::<
@@ -174,9 +174,9 @@ impl Backend for Prover {
                 if res.is_err() {
                     return Err(ProverError::ProvingBackendError);
                 }
-
+                log!("Proof created in [{:?}]", now.elapsed());
                 let proof = transcript.finalize();
-                println!("Proof size [{} kB]", proof.len() as f64 / 1024.0);
+                // println!("Proof size [{} kB]", proof.len() as f64 / 1024.0);
                 Ok(proof)
             })
             .collect::<Result<Vec<Proof>, ProverError>>()?;

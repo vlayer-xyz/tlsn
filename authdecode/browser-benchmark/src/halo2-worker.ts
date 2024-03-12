@@ -18,16 +18,12 @@ export const setup = async () => {
 
 export const prover = () =>  {
     console.log('Prove called');
-    console.time("Proving latency");
     prove();
-    console.timeEnd("Proving latency");
 };
 
 export const verifier = () => {
     console.log('Verify called');
-    console.time("Proving + verifying latency");
     verify();
-    console.timeEnd("Proving + verifying latency");
 };
 
 const exports = {

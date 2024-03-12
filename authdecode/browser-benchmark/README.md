@@ -25,7 +25,7 @@ The implementation of wasm prover and verifier code, together with the react app
 ## Miscellaneous
 - One can also run `npm start` to start the react app, but `npm run build` can produce an optimised production build for better performance benchmarking
 - [serve.json](./serve.json) has to be used to allow multithreading in browser to work ([ref](https://github.com/RReverser/wasm-bindgen-rayon?tab=readme-ov-file#setting-up))
-- Usage of `std::time` needs to be replaced or removed in rust codes, else browser will complain `time not implemented on this platform`
+- Usage of `std::time` needs to be replaced (e.g. with [this](https://crates.io/crates/instant)) or removed in rust codes, else browser will complain `time not implemented on this platform`
 - In [package.json](./package.json), `"ignorePatterns": ["wasm"]` needs to be defined to avoid eslint error on js files compiled from wasm
 - [config](./config/) and [scripts](./scripts/) are copied from [zordle](https://github.com/nalinbhardwaj/zordle) — they mainly handle bundling and building of the react app using webpack
 - To compile authdecode without wasm, one can run cargo with your machine target, e.g. `cargo clippy --target aarch64-apple-darwin`

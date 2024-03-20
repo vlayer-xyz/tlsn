@@ -218,6 +218,25 @@ fn hash_internal(inputs: &[Bn256F]) -> Result<Bn256F, ProverError> {
     Ok(digest)
 }
 
+#[cfg(test)]
+mod test {
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha12Rng;
+
+    use super::*;
+
+    #[test]
+    fn generate_hash() {
+        let plaintext = "1".as_bytes();
+        println!("Preimage: {:?}", BigUint::from_bytes_be(&plaintext));
+
+        let field_element = Bn256F::from_bytes_be(plaintext.into());
+        let digest = poseidon_1(&[field_element]);
+
+        let digest_decimal = BigUint::from_bytes_be(&digest.into_bytes_be());
+        println!("Digest generated: {:?}", digest_decimal);
+    }
+}
 // #[cfg(test)]
 // mod tests {
 //     use super::*;

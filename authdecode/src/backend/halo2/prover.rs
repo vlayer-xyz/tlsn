@@ -1,6 +1,3 @@
-use crate::{
-    backend::halo2::{poseidon::poseidon_2, utils::biguint_to_f}, log, prover::{backend::Backend, error::ProverError}, utils::{bits_to_biguint, u8vec_to_boolvec}, Proof, ProofInput
-};
 use halo2_proofs::{
     halo2curves::bn256::{Bn256, Fr as F, G1Affine},
     plonk,
@@ -14,20 +11,26 @@ use halo2_proofs::{
     },
     transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
 };
-
 use instant::Instant;
-use rand::Rng;
+use num::BigUint;
+use rand::{Rng, thread_rng};
+use std::ops::Shl;
+
+use crate::{
+    backend::halo2::{circuit::TOTAL_FIELD_ELEMENTS, poseidon::poseidon_2, utils::biguint_to_f},
+    log,
+    prover::{backend::Backend, error::ProverError},
+    utils::{bits_to_biguint, u8vec_to_boolvec},
+    Proof, ProofInput,
+};
 
 use super::{
-    circuit::{AuthDecodeCircuit, FIELD_ELEMENTS},
+    circuit::{AuthDecodeCircuit, FULL_FIELD_ELEMENTS},
     poseidon::{poseidon_1, poseidon_15},
     utils::{deltas_to_matrices, f_to_bigint},
     CHUNK_SIZE, USEFUL_BITS,
 };
-use crate::backend::halo2::circuit::SALT_SIZE;
-
-use num::BigUint;
-use rand::thread_rng;
+use crate::backend::halo2::circuit::{ENCODING_SUM_SALT_SIZE, PLAINTEXT_SALT_SIZE};
 
 /// halo2's native ProvingKey can't be used without params, so we wrap
 /// them in one struct.
@@ -59,17 +62,16 @@ impl Backend for Prover {
         // Generate random salt and add it to the plaintext.
         let mut rng = thread_rng();
         let salt: Vec<bool> = core::iter::repeat_with(|| rng.gen::<bool>())
-            .take(SALT_SIZE)
+            .take(PLAINTEXT_SALT_SIZE)
             .collect::<Vec<_>>();
         let salt = bits_to_biguint(&salt);
 
         // Convert bits into field elements
-        let mut field_elements: Vec<BigUint> =
-            plaintext.chunks(USEFUL_BITS).map(bits_to_biguint).collect();
+        let field_elements: Vec<BigUint> = plaintext.chunks(USEFUL_BITS).map(bits_to_biguint).collect();
         // Add salt
-        field_elements.push(salt.clone());
+        let salted_field_elements = salt_chunk(field_elements, &salt)?;
 
-        let pt_digest = hash_internal(&field_elements)?;
+        let pt_digest = hash_internal(&salted_field_elements)?;
 
         Ok((pt_digest, salt))
     }
@@ -81,12 +83,12 @@ impl Backend for Prover {
         // Generate random salt
         let mut rng = thread_rng();
         let salt: Vec<bool> = core::iter::repeat_with(|| rng.gen::<bool>())
-            .take(SALT_SIZE)
+            .take(ENCODING_SUM_SALT_SIZE)
             .collect::<Vec<_>>();
 
         // Commit to encodings
 
-        let mut enc_sum_bits = u8vec_to_boolvec(&encoding_sum.to_bytes_be());
+        let enc_sum_bits = u8vec_to_boolvec(&encoding_sum.to_bytes_be());
         debug_assert!(enc_sum_bits.len() <= 125);
 
         if enc_sum_bits.len() > USEFUL_BITS {
@@ -100,7 +102,9 @@ impl Backend for Prover {
         // Pack sum and salt into a single field element, to achive this order starting from the MSB:
         // zero padding | sum | salt
 
-        let enc_digest = hash_internal(&[enc_sum, salt.clone()])?;
+        let salted_sum = enc_sum.shl(ENCODING_SUM_SALT_SIZE) + salt.clone();
+
+        let enc_digest = hash_internal(&[salted_sum])?;
 
         Ok((enc_digest, salt))
     }
@@ -126,7 +130,7 @@ impl Backend for Prover {
                     .collect::<Vec<_>>();
 
                 // convert plaintext into F type
-                let plaintext: [F; FIELD_ELEMENTS] = plaintext
+                let plaintext: [F; TOTAL_FIELD_ELEMENTS] = plaintext
                     .iter()
                     .map(biguint_to_f)
                     .collect::<Vec<_>>()
@@ -200,7 +204,7 @@ impl Prover {
 }
 
 /// Hashes `inputs` with Poseidon and returns the digest as `BigUint`.
-fn hash_internal(inputs: &[BigUint]) -> Result<BigUint, ProverError> {
+pub fn hash_internal(inputs: &[BigUint]) -> Result<BigUint, ProverError> {
     let digest = match inputs.len() {
         15 => {
             // hash with rate-15 Poseidon
@@ -235,6 +239,20 @@ fn hash_internal(inputs: &[BigUint]) -> Result<BigUint, ProverError> {
         _ => return Err(ProverError::WrongPoseidonInput),
     };
     Ok(f_to_bigint(&digest))
+}
+
+pub fn salt_chunk(chunk: Vec<BigUint>, salt: &BigUint) -> Result<Vec<BigUint>, ProverError> {
+    let len = chunk.len();
+    let last_fe = chunk[len - 1].clone();
+
+    if last_fe.bits() as usize > USEFUL_BITS - PLAINTEXT_SALT_SIZE {
+        // can only happen if there is a logic error in this code
+        return Err(ProverError::WrongLastFieldElementBitCount);
+    }
+
+    let mut salted_chunk = chunk.clone();
+    salted_chunk[len - 1] = last_fe.shl(PLAINTEXT_SALT_SIZE) + salt;
+    Ok(salted_chunk)
 }
 
 // #[cfg(test)]

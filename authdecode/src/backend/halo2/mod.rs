@@ -1,4 +1,5 @@
 mod circuit;
+mod range_check;
 pub mod onetimesetup;
 mod poseidon;
 pub mod prover;
@@ -10,7 +11,7 @@ const USEFUL_BITS: usize = 253;
 
 /// The size of the chunk of plaintext
 /// We use 14 field elements. Only [USEFUL_BITS] of each field element are used.
-const CHUNK_SIZE: usize = 3542;
+const CHUNK_SIZE: usize = 3670;
 
 #[cfg(test)]
 pub(crate) mod tests {

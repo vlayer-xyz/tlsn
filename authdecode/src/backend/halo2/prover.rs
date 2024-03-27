@@ -220,6 +220,7 @@ fn hash_internal(inputs: &[Bn256F]) -> Result<Bn256F, ProverError> {
 
 #[cfg(test)]
 mod test {
+    use ff::PrimeField;
     use rand::SeedableRng;
     use rand_chacha::ChaCha12Rng;
 
@@ -227,14 +228,18 @@ mod test {
 
     #[test]
     fn generate_hash() {
-        let plaintext = "1".as_bytes();
-        println!("Preimage: {:?}", BigUint::from_bytes_be(&plaintext));
+        let preimage = F::from_str_vartime("3543206543423413248234889464321231").unwrap();
 
-        let field_element = Bn256F::from_bytes_be(plaintext.into());
+        let digest_decimal = BigUint::from_bytes_le(&preimage.to_bytes());
+        println!("Decimal preimage: {:?}", digest_decimal);
+        println!("Hex preimage: {:?}", preimage);
+
+        let field_element = Bn256F::new(preimage);
         let digest = poseidon_1(&[field_element]);
 
         let digest_decimal = BigUint::from_bytes_be(&digest.into_bytes_be());
-        println!("Digest generated: {:?}", digest_decimal);
+        println!("Decimal digest: {:?}", digest_decimal);
+        println!("Hex digest: {:?}", digest.inner);
     }
 }
 // #[cfg(test)]
@@ -378,7 +383,7 @@ mod test {
 //             SALT_SIZE
 //         }
 
-//         fn chunk_size(&self) -> usize {
+//         fn chunk_size(&self) -> usize {6
 //             CHUNK_SIZE
 //         }
 

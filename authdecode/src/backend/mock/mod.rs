@@ -62,6 +62,10 @@ impl Field for MockField {
             inner: BigInt::from(0u8),
         }
     }
+
+    fn inner(&self) -> Vec<u8> {
+        unimplemented!()
+    }
 }
 
 /// A mock proof.

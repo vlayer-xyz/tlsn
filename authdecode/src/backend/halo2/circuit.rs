@@ -455,6 +455,7 @@ impl Circuit<F> for AuthDecodeCircuit {
                 let encoding_sum =
                     self.sum(&[dot_product, zero_sum.clone()], &mut region, &cfg, offset)?;
                 offset += 1;
+                println!("Encoding sum circuit: {:?}", encoding_sum);
 
                 let encoding_sum_salted = vec![encoding_sum, encoding_sum_salt];
 

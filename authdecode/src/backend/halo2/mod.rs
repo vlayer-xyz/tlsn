@@ -47,6 +47,10 @@ impl Field for Bn256F {
     fn zero() -> Self {
         Self { inner: Fr::zero() }
     }
+
+    fn inner(&self) -> Vec<u8> {
+        self.inner.to_bytes().to_vec()
+    }
 }
 
 impl Add for Bn256F {

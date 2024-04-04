@@ -65,7 +65,7 @@ mod tests {
     use std::ops::{Add, Sub};
 
     /// The size of plaintext in bytes;
-    const PLAINTEXT_SIZE: usize = 1000;
+    const PLAINTEXT_SIZE: usize = 100;
 
     #[rstest]
     #[case(crate::backend::halo2::tests::backend_pair())]

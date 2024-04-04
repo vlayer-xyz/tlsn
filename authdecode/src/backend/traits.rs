@@ -59,4 +59,7 @@ pub trait Field {
 
     /// Returns zero, the additive identity.
     fn zero() -> Self;
+
+    /// Return inner bytes
+    fn inner(&self) -> Vec<u8>;
 }

@@ -108,6 +108,7 @@ where
         // Convert the encodings and compute their sum.
         let encodings = self.encodings.convert();
         let sum = encodings.compute_sum::<F>();
+        println!("Encoding sum clear: {:x?}", sum.inner());
 
         let (plaintext_hash, plaintext_salt) = backend.commit_plaintext(encodings.plaintext())?;
 

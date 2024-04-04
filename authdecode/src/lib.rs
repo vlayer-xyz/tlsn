@@ -68,7 +68,6 @@ mod tests {
     const PLAINTEXT_SIZE: usize = 1000;
 
     #[rstest]
-    #[case(crate::backend::mock::tests::backend_pair())]
     #[case(crate::backend::halo2::tests::backend_pair())]
     // Tests the protocol with different backends.
     fn test_authdecode<

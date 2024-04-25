@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tls_core::cert;
 use tlsn_core::{
     attestation::{
-        self, Attestation, AttestationBodyBuilder, AttestationFull, AttestationHeader, Field,
+        self, Attestation, AttestationBodyBuilder, AttestationFull, AttestationHeader, FieldData,
         Secret, ATTESTATION_VERSION,
     },
     conn::{
@@ -85,11 +85,11 @@ fn test_api() {
     // Notary constructs an attestation body according to their view of the connection.
     let mut builder = AttestationBodyBuilder::default();
     builder
-        .field(Field::ConnectionInfo(connection_info))
-        .field(Field::HandshakeData(handshake_data))
-        .field(Field::CertificateCommitment(cert_commitment))
-        .field(Field::CertificateChainCommitment(cert_chain_commiment))
-        .field(Field::EncodingCommitment(EncodingCommitment {
+        .field(FieldData::ConnectionInfo(connection_info))
+        .field(FieldData::HandshakeData(handshake_data))
+        .field(FieldData::CertificateCommitment(cert_commitment))
+        .field(FieldData::CertificateChainCommitment(cert_chain_commiment))
+        .field(FieldData::EncodingCommitment(EncodingCommitment {
             root: encoding_commitment_root,
             seed: fixtures::encoder_seed().to_vec(),
         }));

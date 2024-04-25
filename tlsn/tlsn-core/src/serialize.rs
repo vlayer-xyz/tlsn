@@ -1,7 +1,7 @@
 //! Canonical serialization of TLSNotary types.
 
 use crate::{
-    attestation::{AttestationHeader, Field, ATTESTATION_ID_LEN, ATTESTATION_VERSION_LEN},
+    attestation::{AttestationHeader, FieldData, ATTESTATION_ID_LEN, ATTESTATION_VERSION_LEN},
     conn::{
         Certificate, ConnectionInfo, HandshakeData, HandshakeDataV1_2, ServerEphemKey,
         ServerSignature, TlsVersion,
@@ -18,6 +18,13 @@ use crate::{
 pub(crate) trait CanonicalSerialize {
     /// Serializes the type into a byte vector.
     fn serialize(&self) -> Vec<u8>;
+}
+
+impl CanonicalSerialize for &dyn CanonicalSerialize {
+    #[inline]
+    fn serialize(&self) -> Vec<u8> {
+        (*self).serialize()
+    }
 }
 
 // Make sure to take advantage of destructuring where possible, so if fields are added to a struct
@@ -93,39 +100,6 @@ impl CanonicalSerialize for Certificate {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&(cert.len() as u32).to_le_bytes());
         bytes.extend(cert);
-        bytes
-    }
-}
-
-impl CanonicalSerialize for Field {
-    #[inline]
-    fn serialize(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(self.kind() as u8);
-        match self {
-            Field::ConnectionInfo(info) => {
-                bytes.extend(CanonicalSerialize::serialize(info));
-            }
-            Field::HandshakeData(data) => {
-                bytes.extend(CanonicalSerialize::serialize(data));
-            }
-            Field::CertificateCommitment(commitment) => {
-                bytes.extend(CanonicalSerialize::serialize(commitment));
-            }
-            Field::CertificateChainCommitment(commitment) => {
-                bytes.extend(CanonicalSerialize::serialize(commitment));
-            }
-            Field::EncodingCommitment(commitment) => {
-                bytes.extend(CanonicalSerialize::serialize(commitment));
-            }
-            Field::PlaintextHash(hash) => {
-                bytes.extend(CanonicalSerialize::serialize(hash));
-            }
-            Field::ExtraData(data) => {
-                bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
-                bytes.extend(data);
-            }
-        }
         bytes
     }
 }

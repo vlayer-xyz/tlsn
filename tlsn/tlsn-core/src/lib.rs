@@ -26,3 +26,17 @@ pub(crate) mod sealed {
     #[allow(unreachable_pub)]
     pub trait Sealed {}
 }
+
+/// A validation error.
+#[derive(Debug, thiserror::Error)]
+#[error("validation error: {0}")]
+pub struct ValidationError(Box<dyn std::error::Error + Send + Sync + 'static>);
+
+impl ValidationError {
+    pub(crate) fn new<E>(err: E) -> Self
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    {
+        Self(err.into())
+    }
+}

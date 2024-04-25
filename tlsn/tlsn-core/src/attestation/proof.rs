@@ -24,14 +24,12 @@ pub struct BodyProof {
 impl BodyProof {
     /// Verifies the proof against the attestation header.
     pub fn verify(self, header: &AttestationHeader) -> Result<AttestationBody, BodyProofError> {
-        let mut fields: Vec<_> = self
+        let (leaf_indices, leafs): (Vec<_>, Vec<_>) = self
             .body
-            .fields
-            .iter()
-            .map(|(id, field)| (id.0 as usize, field.clone()))
-            .collect();
-        fields.sort_by_key(|(id, _)| *id);
-        let (leaf_indices, leafs): (Vec<_>, Vec<_>) = fields.into_iter().unzip();
+            .sorted_fields()
+            .into_iter()
+            .map(|(id, field)| (id.0 as usize, field))
+            .unzip();
 
         self.proof
             .verify(&header.root, &leaf_indices, &leafs)
@@ -107,24 +105,11 @@ impl AttestationProof {
     ) -> Result<AttestationProofOutput, AttestationProofError> {
         let body = self.body_proof.verify(header)?;
         let server_identity = if let Some(proof) = self.identity_proof {
-            let info = body
-                .get_info()
-                .ok_or_else(|| AttestationProofError::MissingField(FieldKind::ConnectionInfo))?;
-            let handshake_data = body
-                .get_handshake_data()
-                .ok_or_else(|| AttestationProofError::MissingField(FieldKind::HandshakeData))?;
-            let cert_commitment = body.get_cert_commitment().ok_or_else(|| {
-                AttestationProofError::MissingField(FieldKind::CertificateCommitment)
-            })?;
-            let cert_chain_commitment = body.get_cert_chain_commitment().ok_or_else(|| {
-                AttestationProofError::MissingField(FieldKind::CertificateChainCommitment)
-            })?;
-
             Some(proof.verify(
-                info,
-                handshake_data,
-                cert_commitment,
-                cert_chain_commitment,
+                body.conn_info(),
+                body.handshake_data(),
+                &body.cert_commitment().0,
+                &body.cert_chain_commitment().0,
                 cert_verifier,
             )?)
         } else {

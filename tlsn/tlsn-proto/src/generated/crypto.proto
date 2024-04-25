@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package crypto;
+
+message Signature {
+    string scheme = 1;
+    bytes value = 2;
+}
+
+message Hash {
+    string algorithm = 1;
+    bytes value = 2;
+}
+
+message EncodingCommitment {
+    Hash root = 1;
+    bytes seed = 2;
+}

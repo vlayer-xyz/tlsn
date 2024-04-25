@@ -189,7 +189,7 @@ impl MerkleTree {
         }
     }
 
-    pub(crate) fn insert<T: CanonicalSerialize>(&mut self, leaf: &T) {
+    pub(crate) fn insert<T: CanonicalSerialize + ?Sized>(&mut self, leaf: &T) {
         match &mut self.0 {
             MerkleTreeAlg::Sha256(tree) => tree.insert(leaf),
             MerkleTreeAlg::Blake3(tree) => tree.insert(leaf),
@@ -252,7 +252,7 @@ where
     H: Hasher,
 {
     /// Inserts a new leaf into the Merkle tree
-    pub(crate) fn insert<T: CanonicalSerialize>(&mut self, leaf: &T) {
+    pub(crate) fn insert<T: CanonicalSerialize + ?Sized>(&mut self, leaf: &T) {
         self.0.insert(<H as Hasher>::hash(&leaf.serialize()));
         self.0.commit();
     }

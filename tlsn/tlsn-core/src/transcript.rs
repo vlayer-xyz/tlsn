@@ -4,9 +4,10 @@ use std::ops::Range;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+use tlsn_proto::connection as proto;
 use utils::range::{IndexRanges, RangeDifference, RangeSet, RangeUnion};
 
-use crate::{conn::TranscriptLength, serialize::CanonicalSerialize};
+use crate::{conn::TranscriptLength, serialize::CanonicalSerialize, ValidationError};
 
 pub use validation::{InvalidSubsequence, InvalidSubsequenceIdx};
 
@@ -82,6 +83,17 @@ impl Transcript {
             Subsequence::new(idx.clone(), data.index_ranges(&idx.ranges))
                 .expect("data is same length as index"),
         )
+    }
+}
+
+impl TryFrom<proto::Transcript> for Transcript {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::Transcript) -> Result<Self, Self::Error> {
+        Ok(Transcript {
+            sent: Bytes::copy_from_slice(&value.sent),
+            received: Bytes::copy_from_slice(&value.received),
+        })
     }
 }
 
@@ -286,6 +298,20 @@ pub enum Direction {
     Received = 0x01,
 }
 
+impl TryFrom<proto::Direction> for Direction {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::Direction) -> Result<Self, Self::Error> {
+        Ok(match value {
+            proto::Direction::UNSPECIFIED => {
+                return Err(ValidationError::new("unspecified direction"))
+            }
+            proto::Direction::SENT => Direction::Sent,
+            proto::Direction::RECEIVED => Direction::Received,
+        })
+    }
+}
+
 /// A transcript subsequence index.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "validation::SubsequenceIdxUnchecked")]
@@ -348,6 +374,24 @@ impl CanonicalSerialize for SubsequenceIdx {
             bytes.extend_from_slice(&(range.end as u32).to_le_bytes());
         }
         bytes
+    }
+}
+
+impl TryFrom<proto::SubsequenceIdx> for SubsequenceIdx {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::SubsequenceIdx) -> Result<Self, Self::Error> {
+        SubsequenceIdx::new(
+            Direction::try_from(value.direction)?,
+            RangeSet::from(
+                value
+                    .ranges
+                    .iter()
+                    .map(|r| r.start as usize..r.end as usize)
+                    .collect::<Vec<_>>(),
+            ),
+        )
+        .map_err(|e| ValidationError::new(e))
     }
 }
 

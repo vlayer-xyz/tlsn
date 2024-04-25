@@ -13,7 +13,7 @@ use tlsn_common::{
 };
 use tlsn_core::{
     attestation::{
-        Attestation, AttestationBodyBuilder, AttestationHeader, Field, ATTESTATION_VERSION,
+        Attestation, AttestationBodyBuilder, AttestationHeader, FieldData, ATTESTATION_VERSION,
     },
     conn::{
         ConnectionInfo, HandshakeData, HandshakeDataV1_2, KeyType, ServerEphemKey, TlsVersion,
@@ -89,13 +89,13 @@ impl Verifier<Notarize> {
 
             let mut attestation_body_builder = AttestationBodyBuilder::default();
             attestation_body_builder
-                .field(Field::ConnectionInfo(info))
-                .field(Field::HandshakeData(hs_data))
-                .field(Field::CertificateCommitment(cert_commitment))
-                .field(Field::CertificateChainCommitment(cert_chain_commitment));
+                .field(FieldData::ConnectionInfo(info))
+                .field(FieldData::HandshakeData(hs_data))
+                .field(FieldData::CertificateCommitment(cert_commitment))
+                .field(FieldData::CertificateChainCommitment(cert_chain_commitment));
 
             if let Some(root) = encoding_commitment_root {
-                attestation_body_builder.field(Field::EncodingCommitment(EncodingCommitment {
+                attestation_body_builder.field(FieldData::EncodingCommitment(EncodingCommitment {
                     root,
                     seed: encoder_seed.to_vec(),
                 }));
@@ -157,7 +157,7 @@ fn convert_mpc_tls_data(data: MpcTlsFollowerData, time: u64) -> (ConnectionInfo,
             client_random: data.client_random,
             server_random: data.server_random,
             server_ephemeral_key: ServerEphemKey {
-                typ: KeyType::Secp256r1,
+                typ: KeyType::SECP256R1,
                 key: data.server_key.key,
             },
         }),

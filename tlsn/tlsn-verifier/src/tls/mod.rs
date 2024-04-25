@@ -357,7 +357,7 @@ pub(crate) fn convert_mpc_tls_data(
             client_random: data.client_random,
             server_random: data.server_random,
             server_ephemeral_key: ServerEphemKey {
-                typ: KeyType::Secp256r1,
+                typ: KeyType::SECP256R1,
                 key: data.server_key.key,
             },
         }),

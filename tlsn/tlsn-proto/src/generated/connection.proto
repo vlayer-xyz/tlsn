@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package connection;
+
+import "crypto.proto";
+
+message ConnectionInfo {
+    uint64 time = 1;
+    TlsVersion version = 2;
+    TranscriptLength transcript_length = 3;
+}
+
+message TranscriptLength {
+    uint32 sent = 1;
+    uint32 received = 2;
+}
+
+enum TlsVersion {
+    UNSPECIFIED = 0;
+    V1_2 = 1;
+    V1_3 = 2;
+}
+
+message HandshakeData {
+    oneof data {
+        HandshakeDataV1_2 v1_2 = 1;
+    }
+}
+
+message HandshakeDataV1_2 {
+    bytes client_random = 1;
+    bytes server_random = 2;
+    ServerEphemKey server_ephemeral_key = 3;
+}
+
+message ServerIdentity {
+    string name = 1;
+}
+
+message CertificateData {
+    repeated bytes certs = 1;
+    crypto.Signature sig = 2;
+}
+
+enum KeyType {
+    UNSPECIFIED = 0;
+    SECP256R1 = 1;
+}
+
+message ServerEphemKey {
+    KeyType key_type = 1;
+    bytes key = 2;
+}
+
+enum Direction {
+    UNSPECIFIED = 0;
+    SENT = 1;
+    RECEIVED = 2;
+}
+
+message SubsequenceIdx {
+    repeated Range ranges = 1;
+    Direction direction = 2;
+}
+
+message Range {
+    uint32 start = 1;
+    uint32 end = 2;
+}
+
+message Transcript {
+    bytes sent = 1;
+    bytes received = 2;
+}

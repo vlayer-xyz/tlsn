@@ -12,11 +12,13 @@ use tls_core::{
     },
     verify::{ServerCertVerifier as _, WebPkiVerifier},
 };
+use tlsn_proto::connection as proto;
 use web_time::{Duration, UNIX_EPOCH};
 
 use crate::{
     hash::{Hash, HashAlgorithm},
     serialize::CanonicalSerialize,
+    ValidationError,
 };
 
 pub use proof::{ServerIdentityProof, ServerIdentityProofError};
@@ -29,6 +31,20 @@ pub enum TlsVersion {
     V1_2 = 0x00,
     /// TLS 1.3.
     V1_3 = 0x01,
+}
+
+impl TryFrom<proto::TlsVersion> for TlsVersion {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::TlsVersion) -> Result<Self, Self::Error> {
+        Ok(match value {
+            proto::TlsVersion::UNSPECIFIED => {
+                return Err(ValidationError::new("unspecified TLS version"))
+            }
+            proto::TlsVersion::V1_2 => TlsVersion::V1_2,
+            proto::TlsVersion::V1_3 => TlsVersion::V1_3,
+        })
+    }
 }
 
 /// A Server's identity, a.k.a. the DNS name.
@@ -54,13 +70,35 @@ impl AsRef<str> for ServerIdentity {
     }
 }
 
+impl TryFrom<proto::ServerIdentity> for ServerIdentity {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::ServerIdentity) -> Result<Self, Self::Error> {
+        Ok(ServerIdentity(value.name.to_string()))
+    }
+}
+
 /// The type of a public key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
+#[allow(non_camel_case_types)]
 pub enum KeyType {
     /// secp256r1.
-    Secp256r1 = 0x0017,
+    SECP256R1 = 0x0017,
+}
+
+impl TryFrom<proto::KeyType> for KeyType {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::KeyType) -> Result<Self, Self::Error> {
+        Ok(match value {
+            proto::KeyType::UNSPECIFIED => {
+                return Err(ValidationError::new("unspecified key type"))
+            }
+            proto::KeyType::SECP256R1 => KeyType::SECP256R1,
+        })
+    }
 }
 
 /// Signature scheme on the key exchange parameters.
@@ -149,13 +187,24 @@ impl ServerEphemKey {
     /// Encodes the key exchange parameters as in TLS.
     pub(crate) fn kx_params(&self) -> Vec<u8> {
         let group = match self.typ {
-            KeyType::Secp256r1 => NamedGroup::secp256r1,
+            KeyType::SECP256R1 => NamedGroup::secp256r1,
         };
 
         let mut kx_params = Vec::new();
         ServerECDHParams::new(group, &self.key).encode(&mut kx_params);
 
         kx_params
+    }
+}
+
+impl TryFrom<proto::ServerEphemKey> for ServerEphemKey {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::ServerEphemKey) -> Result<Self, Self::Error> {
+        Ok(Self {
+            typ: value.key_type.try_into()?,
+            key: value.key.to_vec(),
+        })
     }
 }
 
@@ -170,6 +219,21 @@ pub struct ConnectionInfo {
     pub transcript_length: TranscriptLength,
 }
 
+impl TryFrom<proto::ConnectionInfo> for ConnectionInfo {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::ConnectionInfo) -> Result<Self, Self::Error> {
+        Ok(Self {
+            time: value.time,
+            version: value.version.try_into()?,
+            transcript_length: value
+                .transcript_length
+                .ok_or_else(|| ValidationError::new("missing transcript length"))?
+                .try_into()?,
+        })
+    }
+}
+
 /// Transcript length information.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranscriptLength {
@@ -177,6 +241,17 @@ pub struct TranscriptLength {
     pub sent: u32,
     /// The number of bytes received by the Prover from the Server.
     pub received: u32,
+}
+
+impl TryFrom<proto::TranscriptLength> for TranscriptLength {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::TranscriptLength) -> Result<Self, Self::Error> {
+        Ok(Self {
+            sent: value.sent,
+            received: value.received,
+        })
+    }
 }
 
 /// TLS 1.2 handshake data.
@@ -188,6 +263,27 @@ pub struct HandshakeDataV1_2 {
     pub server_random: [u8; 32],
     /// The server's ephemeral public key.
     pub server_ephemeral_key: ServerEphemKey,
+}
+
+impl TryFrom<proto::HandshakeDataV1_2> for HandshakeDataV1_2 {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::HandshakeDataV1_2) -> Result<Self, Self::Error> {
+        Ok(Self {
+            client_random: value
+                .client_random
+                .try_into()
+                .map_err(|_| ValidationError::new("client random is not 32 bytes"))?,
+            server_random: value
+                .server_random
+                .try_into()
+                .map_err(|_| ValidationError::new("server random is not 32 bytes"))?,
+            server_ephemeral_key: value
+                .server_ephemeral_key
+                .ok_or_else(|| ValidationError::new("missing server ephemeral key"))?
+                .try_into()?,
+        })
+    }
 }
 
 /// TLS handshake data.

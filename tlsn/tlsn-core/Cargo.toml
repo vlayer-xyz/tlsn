@@ -14,7 +14,7 @@ fixtures = ["dep:hex"]
 
 [dependencies]
 tlsn-tls-core = { workspace = true, features = ["serde"] }
-
+tlsn-proto.workspace = true
 tlsn-utils.workspace = true
 
 mpz-core.workspace = true

@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package attestation;
+
+import "connection.proto";
+import "crypto.proto";
+
+message AttestationHeader {
+    bytes id = 1;
+    uint32 version = 2;
+    crypto.Hash root = 3;
+}
+
+message AttestationBody {
+    map<uint32, Field> fields = 1;
+}
+
+message Attestation {
+    crypto.Signature signature = 1;
+    AttestationHeader header = 2;
+    AttestationBody body = 3;
+}
+
+message AttestationFull {
+    crypto.Signature signature = 1;
+    AttestationHeader header = 2;
+    AttestationBody body = 3;
+    connection.Transcript transcript = 4;
+    repeated Secret secrets = 5;
+}
+
+message Field {
+    oneof data {
+        connection.ConnectionInfo connection_info = 1;
+        connection.HandshakeData handshake_data = 2;
+        crypto.Hash cert_commitment = 3;
+        crypto.Hash cert_chain_commitment = 4;
+        crypto.EncodingCommitment encoding_commitment = 5;
+        PlaintextHash plaintext_hash = 6;
+        bytes extra_data = 7;
+    }
+}
+
+message Secret {
+    oneof data {
+        CertificateSecrets cert_secrets = 1;
+        connection.ServerIdentity server_identity = 2;
+        PlaintextHashSecret plaintext_hash = 3;
+    }
+}
+
+message CertificateSecrets {
+    connection.CertificateData data = 1;
+    bytes cert_nonce = 2;
+    bytes cert_chain_nonce = 3;
+}
+
+message PlaintextHashSecret {
+    connection.SubsequenceIdx idx = 1;
+    bytes nonce = 2;
+    uint32 commitment_id = 3;
+}
+
+message PlaintextHash {
+    connection.SubsequenceIdx idx = 1;
+    crypto.Hash hash = 2;
+}

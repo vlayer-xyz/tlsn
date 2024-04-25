@@ -5,7 +5,7 @@ mod config;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    attestation::{AttestationBody, Field, FieldId, FieldKind},
+    attestation::{AttestationBody, FieldId, FieldKind},
     encoding::{EncodingProof, EncodingProofError},
     hash::{HashAlgorithm, PlaintextHashProof, PlaintextHashProofError},
     transcript::PartialTranscript,
@@ -72,9 +72,7 @@ impl SubstringProof {
         self,
         attestation_body: &AttestationBody,
     ) -> Result<PartialTranscript, SubstringProofError> {
-        let info = attestation_body
-            .get_info()
-            .ok_or_else(|| SubstringProofError::MissingField(FieldKind::ConnectionInfo))?;
+        let info = attestation_body.conn_info();
 
         let mut transcript = PartialTranscript::new(
             info.transcript_length.sent as usize,
@@ -84,7 +82,7 @@ impl SubstringProof {
         // Verify encoding proof.
         if let Some(proof) = self.encoding_proof {
             let commitment = attestation_body
-                .get_encoding_commitment()
+                .encoding_commitment()
                 .ok_or_else(|| SubstringProofError::MissingField(FieldKind::EncodingCommitment))?;
             let seq = proof.verify(&info.transcript_length, commitment)?;
             transcript.union_transcript(&seq);
@@ -92,15 +90,16 @@ impl SubstringProof {
 
         // Verify hash openings.
         for opening in self.hash_proofs {
-            let Field::PlaintextHash(commitment) = attestation_body
-                .get(opening.commitment_id())
-                .ok_or_else(|| SubstringProofError::MissingField(FieldKind::PlaintextHash))?
-            else {
-                return Err(SubstringProofError::IncorrectField {
-                    id: opening.commitment_id().clone(),
-                    kind: FieldKind::PlaintextHash,
-                });
-            };
+            let commitment = attestation_body
+                .plaintext_hashes()
+                .find_map(|field| {
+                    if &field.id() == opening.commitment_id() {
+                        Some(field.data().inner())
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| SubstringProofError::MissingField(FieldKind::PlaintextHash))?;
 
             let seq = opening.verify(commitment)?;
             transcript.union_subsequence(&seq);

@@ -4,7 +4,7 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use rand::{thread_rng, Rng};
 use tlsn_common::{attestation::AttestationRequest, msg::TlsnMessage};
 use tlsn_core::{
-    attestation::{AttestationBodyBuilder, AttestationFull, Field, Secret},
+    attestation::{AttestationBodyBuilder, AttestationFull, FieldData, Secret},
     conn::{CertificateSecrets, ConnectionInfo, ServerIdentity, TlsVersion},
     encoding::{EncodingCommitment, EncodingTree},
     substring::SubstringCommitConfigBuilder,
@@ -128,13 +128,13 @@ impl Prover<Notarize> {
 
         let mut attestation_body_builder = AttestationBodyBuilder::default();
         attestation_body_builder
-            .field(Field::ConnectionInfo(conn_info))
-            .field(Field::HandshakeData(hs_data))
-            .field(Field::CertificateCommitment(cert_commitment))
-            .field(Field::CertificateChainCommitment(cert_chain_commitment));
+            .field(FieldData::ConnectionInfo(conn_info))
+            .field(FieldData::HandshakeData(hs_data))
+            .field(FieldData::CertificateCommitment(cert_commitment))
+            .field(FieldData::CertificateChainCommitment(cert_chain_commitment));
 
         if let Some(encoding_tree) = &encoding_tree {
-            attestation_body_builder.field(Field::EncodingCommitment(EncodingCommitment {
+            attestation_body_builder.field(FieldData::EncodingCommitment(EncodingCommitment {
                 root: encoding_tree.root(),
                 seed: notary_encoder_seed.to_vec(),
             }));

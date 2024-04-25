@@ -381,7 +381,7 @@ pub(crate) fn convert_mpc_tls_data(data: MpcTlsData) -> (HandshakeData, Certific
         server_random: data.server_random.0,
         server_ephemeral_key: ServerEphemKey {
             // Only supported key type right now.
-            typ: KeyType::Secp256r1,
+            typ: KeyType::SECP256R1,
             key: data.server_public_key.key,
         },
     });

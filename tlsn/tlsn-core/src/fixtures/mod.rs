@@ -49,7 +49,7 @@ impl ConnectionFixture {
                 ))
                 .unwrap(),
                 server_ephemeral_key: ServerEphemKey {
-                    typ: KeyType::Secp256r1,
+                    typ: KeyType::SECP256R1,
                     key: Vec::<u8>::from_hex(include_bytes!("data/tlsnotary.org/pubkey")).unwrap(),
                 },
             }),
@@ -87,7 +87,7 @@ impl ConnectionFixture {
                 ))
                 .unwrap(),
                 server_ephemeral_key: ServerEphemKey {
-                    typ: KeyType::Secp256r1,
+                    typ: KeyType::SECP256R1,
                     key: Vec::<u8>::from_hex(include_bytes!("data/appliedzkp.org/pubkey")).unwrap(),
                 },
             }),

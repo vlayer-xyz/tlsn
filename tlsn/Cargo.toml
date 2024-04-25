@@ -2,6 +2,7 @@
 members = [
     "tlsn-core",
     "tlsn-common",
+    "tlsn-proto",
     "tlsn-verifier",
     "tlsn-prover",
     "tlsn-formats",
@@ -16,6 +17,7 @@ resolver = "2"
 [workspace.dependencies]
 tlsn-core = { path = "tlsn-core" }
 tlsn-common = { path = "tlsn-common" }
+tlsn-proto = { path = "tlsn-proto" }
 tlsn-prover = { path = "tlsn-prover" }
 tlsn-verifier = { path = "tlsn-verifier" }
 tlsn-data-fixtures = { path = "tlsn-data-fixtures" }

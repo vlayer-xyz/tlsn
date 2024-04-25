@@ -3,9 +3,10 @@
 mod builder;
 mod proof;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, vec};
 
 use serde::{Deserialize, Serialize};
+use tlsn_proto::attestation as proto;
 
 use crate::{
     conn::{
@@ -17,14 +18,13 @@ use crate::{
     serialize::CanonicalSerialize,
     substring::{SubstringProof, SubstringProofConfig, SubstringProofConfigBuilder},
     transcript::SubsequenceIdx,
-    Signature, Transcript,
+    Signature, Transcript, ValidationError,
 };
 
 pub use builder::AttestationBodyBuilder;
 pub use proof::{
     AttestationProof, AttestationProofError, AttestationProofOutput, BodyProof, BodyProofError,
 };
-pub use validation::InvalidAttestationBody;
 
 /// The current version of attestations.
 pub static ATTESTATION_VERSION: AttestationVersion = AttestationVersion(0);
@@ -120,39 +120,59 @@ pub enum SecretKind {
     PlaintextHash = 0x03,
 }
 
-/// A public attestation field.
+/// The data of a public attestation field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Field {
-    /// TLS connection information.
-    ConnectionInfo(ConnectionInfo),
-    /// TLS handshake data.
-    HandshakeData(HandshakeData),
-    /// Commitment to the server's certificate and signature.
-    CertificateCommitment(Hash),
-    /// Commitment to the certificate chain.
-    CertificateChainCommitment(Hash),
-    /// Commitment to the encodings of the transcript plaintext.
-    EncodingCommitment(EncodingCommitment),
-    /// A hash of a range of plaintext in the transcript.
-    PlaintextHash(PlaintextHash),
-    /// Arbitrary extra data bound to the attestation.
-    ExtraData(Vec<u8>),
+pub struct FieldData<T>(T);
+
+impl<T> FieldData<T> {
+    pub(crate) fn to_inner(self) -> T {
+        self.0
+    }
+
+    pub(crate) fn inner(&self) -> &T {
+        &self.0
+    }
 }
 
-impl Field {
-    /// Returns the kind of the field.
-    pub fn kind(&self) -> FieldKind {
-        match self {
-            Field::ConnectionInfo(_) => FieldKind::ConnectionInfo,
-            Field::HandshakeData(_) => FieldKind::HandshakeData,
-            Field::CertificateCommitment(_) => FieldKind::CertificateCommitment,
-            Field::CertificateChainCommitment(_) => FieldKind::CertificateChainCommitment,
-            Field::EncodingCommitment(_) => FieldKind::EncodingCommitment,
-            Field::PlaintextHash(_) => FieldKind::PlaintextHash,
-            Field::ExtraData(_) => FieldKind::ExtraData,
+impl<T: FieldKinded + CanonicalSerialize> CanonicalSerialize for FieldData<T> {
+    fn serialize(&self) -> Vec<u8> {
+        let Self(data) = self;
+
+        let mut bytes = Vec::new();
+        bytes.push(data.kind() as u8);
+        bytes.extend_from_slice(&data.serialize());
+        bytes
+    }
+}
+
+/// A public attestation field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Field<T> {
+    id: FieldId,
+    data: FieldData<T>,
+}
+
+impl<T> Field<T> {
+    pub(crate) fn new(id: FieldId, data: T) -> Self {
+        Self {
+            id,
+            data: FieldData(data),
         }
     }
+
+    pub(crate) fn id(&self) -> FieldId {
+        self.id
+    }
+
+    pub(crate) fn data(&self) -> &FieldData<T> {
+        &self.data
+    }
+}
+
+/// A field with a kind.
+trait FieldKinded {
+    /// Returns the kind of the field.
+    fn kind(&self) -> FieldKind;
 }
 
 /// The kind of a field.
@@ -175,9 +195,86 @@ pub enum FieldKind {
     ExtraData = 0xff,
 }
 
+impl FieldKinded for ConnectionInfo {
+    fn kind(&self) -> FieldKind {
+        FieldKind::ConnectionInfo
+    }
+}
+
+impl FieldKinded for HandshakeData {
+    fn kind(&self) -> FieldKind {
+        FieldKind::HandshakeData
+    }
+}
+
+impl FieldKinded for EncodingCommitment {
+    fn kind(&self) -> FieldKind {
+        FieldKind::EncodingCommitment
+    }
+}
+
+/// A commitment to the server certificate and signature.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CertCommitment(pub(crate) Hash);
+
+impl FieldKinded for CertCommitment {
+    fn kind(&self) -> FieldKind {
+        FieldKind::CertificateCommitment
+    }
+}
+
+impl CanonicalSerialize for CertCommitment {
+    fn serialize(&self) -> Vec<u8> {
+        CanonicalSerialize::serialize(&self.0)
+    }
+}
+
+/// A commitment to the certificate chain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CertChainCommitment(pub(crate) Hash);
+
+impl FieldKinded for CertChainCommitment {
+    fn kind(&self) -> FieldKind {
+        FieldKind::CertificateChainCommitment
+    }
+}
+
+impl CanonicalSerialize for CertChainCommitment {
+    fn serialize(&self) -> Vec<u8> {
+        CanonicalSerialize::serialize(&self.0)
+    }
+}
+
+/// Extra data bound a the attestation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtraData(Vec<u8>);
+
+impl FieldKinded for ExtraData {
+    fn kind(&self) -> FieldKind {
+        FieldKind::ExtraData
+    }
+}
+
+impl CanonicalSerialize for ExtraData {
+    fn serialize(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(self.0.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&self.0);
+        bytes
+    }
+}
+
 /// An identifier for a field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct FieldId(pub u32);
+
+impl FieldId {
+    pub(crate) fn next(&mut self) -> Self {
+        let id = *self;
+        self.0 += 1;
+        id
+    }
+}
 
 /// An attestation header.
 ///
@@ -201,80 +298,102 @@ impl AttestationHeader {
     }
 }
 
-/// The body of an attestation.
+/// A complete attestation body.
 ///
 /// An attestation contains a set of fields which are cryptographically signed by
 /// the Notary via an [`AttestationHeader`]. These fields include data which can be
 /// used to verify aspects of a TLS connection, such as the server's identity, and facts
 /// about the transcript.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(try_from = "validation::AttestationBodyUnchecked")]
 pub struct AttestationBody {
-    /// The fields of the attestation.
-    fields: HashMap<FieldId, Field>,
+    conn_info: Field<ConnectionInfo>,
+    handshake_data: Field<HandshakeData>,
+    cert_commitment: Field<CertCommitment>,
+    cert_chain_commitment: Field<CertChainCommitment>,
+    encoding_commitment: Option<Field<EncodingCommitment>>,
+    plaintext_hashes: Vec<Field<PlaintextHash>>,
+    extra_data: Vec<Field<ExtraData>>,
 }
 
 impl AttestationBody {
-    pub(crate) fn new(fields: HashMap<FieldId, Field>) -> Result<Self, InvalidAttestationBody> {
-        Self::validate(Self { fields })
-    }
-
     /// Computes the Merkle root of the attestation fields.
-    pub fn root(&self, alg: HashAlgorithm) -> Hash {
+    pub(crate) fn root(&self, alg: HashAlgorithm) -> Hash {
         let mut tree = MerkleTree::new(alg);
-        let mut fields = self.fields.iter().collect::<Vec<_>>();
-        fields.sort_by_key(|(id, _)| *id);
-
-        for (_, field) in fields {
+        for (_, field) in self.sorted_fields() {
             tree.insert(field)
         }
-
         tree.root()
     }
 
-    /// Returns the field with the given id.
-    pub fn get(&self, id: &FieldId) -> Option<&Field> {
-        self.fields.get(id)
+    pub(crate) fn sorted_fields(&self) -> Vec<(&FieldId, &dyn CanonicalSerialize)> {
+        let mut fields: Vec<(&FieldId, &dyn CanonicalSerialize)> = vec![
+            (&self.conn_info.id, &self.conn_info.data),
+            (&self.handshake_data.id, &self.handshake_data.data),
+            (&self.cert_commitment.id, &self.cert_commitment.data),
+            (
+                &self.cert_chain_commitment.id,
+                &self.cert_chain_commitment.data,
+            ),
+        ];
+
+        if let Some(encoding_commitment) = &self.encoding_commitment {
+            fields.push((&encoding_commitment.id, &encoding_commitment.data));
+        }
+
+        for field in &self.extra_data {
+            fields.push((&field.id, &field.data));
+        }
+
+        fields.sort_by_key(|(id, _)| *id);
+        fields
     }
 
-    /// Returns an iterator over the fields.
-    pub fn iter(&self) -> impl Iterator<Item = (&FieldId, &Field)> {
-        self.fields.iter()
+    pub(crate) fn conn_info(&self) -> &ConnectionInfo {
+        &self.conn_info.data.0
     }
 
-    pub(crate) fn get_info(&self) -> Option<&ConnectionInfo> {
-        self.fields.iter().find_map(|(_, field)| match field {
-            Field::ConnectionInfo(info) => Some(info),
-            _ => None,
-        })
+    pub(crate) fn handshake_data(&self) -> &HandshakeData {
+        &self.handshake_data.data.0
     }
 
-    pub(crate) fn get_handshake_data(&self) -> Option<&HandshakeData> {
-        self.fields.iter().find_map(|(_, field)| match field {
-            Field::HandshakeData(data) => Some(data),
-            _ => None,
-        })
+    pub(crate) fn cert_commitment(&self) -> &CertCommitment {
+        &self.cert_commitment.data.0
     }
 
-    pub(crate) fn get_encoding_commitment(&self) -> Option<&EncodingCommitment> {
-        self.fields.iter().find_map(|(_, field)| match field {
-            Field::EncodingCommitment(commitment) => Some(commitment),
-            _ => None,
-        })
+    pub(crate) fn cert_chain_commitment(&self) -> &CertChainCommitment {
+        &self.cert_chain_commitment.data.0
     }
 
-    pub(crate) fn get_cert_commitment(&self) -> Option<&Hash> {
-        self.fields.iter().find_map(|(_, field)| match field {
-            Field::CertificateCommitment(commitment) => Some(commitment),
-            _ => None,
-        })
+    pub(crate) fn encoding_commitment(&self) -> Option<&EncodingCommitment> {
+        self.encoding_commitment.as_ref().map(|field| &field.data.0)
     }
 
-    pub(crate) fn get_cert_chain_commitment(&self) -> Option<&Hash> {
-        self.fields.iter().find_map(|(_, field)| match field {
-            Field::CertificateChainCommitment(commitment) => Some(commitment),
-            _ => None,
-        })
+    pub(crate) fn plaintext_hashes(&self) -> impl Iterator<Item = &Field<PlaintextHash>> {
+        self.plaintext_hashes.iter()
+    }
+}
+
+impl TryFrom<proto::AttestationBody> for AttestationBody {
+    type Error = ValidationError;
+
+    fn try_from(value: proto::AttestationBody) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}
+
+impl From<AttestationBody> for proto::AttestationBody {
+    fn from(value: AttestationBody) -> Self {
+        let AttestationBody {
+            conn_info,
+            handshake_data,
+            cert_commitment,
+            cert_chain_commitment,
+            encoding_commitment,
+            plaintext_hashes,
+            extra_data,
+        } = value;
+
+        todo!()
     }
 }
 
@@ -417,56 +536,5 @@ impl AttestationFull {
             Secret::EncodingTree(tree) => Some(tree),
             _ => None,
         })
-    }
-}
-
-mod validation {
-    use super::*;
-
-    /// An error indicating that an attestation body is invalid.
-    #[derive(Debug, thiserror::Error)]
-    #[error("invalid attestation body: {0}")]
-    pub struct InvalidAttestationBody(String);
-
-    impl AttestationBody {
-        pub(crate) fn validate(self) -> Result<Self, InvalidAttestationBody> {
-            let mut counts = HashMap::<FieldKind, usize>::new();
-            for field in self.fields.values() {
-                let kind = field.kind();
-                let count = counts.entry(kind).or_default();
-
-                // Only allow one of each of these fields.
-                if matches!(
-                    kind,
-                    FieldKind::ConnectionInfo
-                        | FieldKind::HandshakeData
-                        | FieldKind::CertificateCommitment
-                        | FieldKind::EncodingCommitment
-                ) && *count > 0
-                {
-                    return Err(InvalidAttestationBody(format!(
-                        "only 1 {:?} field can be present",
-                        kind
-                    )));
-                }
-
-                *count += 1;
-            }
-
-            Ok(self)
-        }
-    }
-
-    #[derive(Debug, Deserialize)]
-    pub(super) struct AttestationBodyUnchecked {
-        fields: HashMap<FieldId, Field>,
-    }
-
-    impl TryFrom<AttestationBodyUnchecked> for AttestationBody {
-        type Error = InvalidAttestationBody;
-
-        fn try_from(body: AttestationBodyUnchecked) -> Result<Self, Self::Error> {
-            AttestationBody::new(body.fields)
-        }
     }
 }

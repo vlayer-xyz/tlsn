@@ -1,0 +1,7 @@
+[package]
+name = "tlsn-proto"
+version = "0.1.0-alpha.5"
+edition = "2021"
+
+[dependencies]
+quick-protobuf = "0.8"

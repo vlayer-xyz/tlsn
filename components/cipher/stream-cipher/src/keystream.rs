@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, marker::PhantomData};
 
-use mpz_garble::{value::ValueRef, Execute, Load, Memory, Prove, Thread, ThreadPool, Verify};
+use mpz_garble::{value::ValueRef, Execute, Load, Memory, Prove, Thread, Verify};
 use utils::id::NestedId;
 
 use crate::{config::ExecutionMode, CtrCircuit, StreamCipherError};
@@ -102,7 +102,7 @@ impl<C: CtrCircuit> KeyStream<C> {
     )]
     pub(crate) async fn preprocess<T>(
         &mut self,
-        pool: &mut ThreadPool<T>,
+        thread: &mut T,
         key: &ValueRef,
         iv: &ValueRef,
         len: usize,
@@ -111,26 +111,17 @@ impl<C: CtrCircuit> KeyStream<C> {
         T: Thread + Memory + Load + Send + 'static,
     {
         let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
-        let vars = self.define_vars(pool.get_mut(), block_count)?;
+        let vars = self.define_vars(thread, block_count)?;
 
-        let mut scope = pool.new_scope();
         for (block, nonce, ctr) in vars.iter() {
-            scope.push(move |thread| {
-                Box::pin(preprocess_block::<T, C>(
-                    thread,
-                    key.clone(),
-                    iv.clone(),
-                    block.clone(),
-                    nonce.clone(),
-                    ctr.clone(),
-                ))
-            });
+            thread
+                .load(
+                    C::circuit(),
+                    &[key.clone(), iv.clone(), nonce.clone(), ctr.clone()],
+                    &[block.clone()],
+                )
+                .await?;
         }
-        scope
-            .wait()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
 
         self.preprocessed.extend(vars);
 
@@ -143,7 +134,7 @@ impl<C: CtrCircuit> KeyStream<C> {
     )]
     pub(crate) async fn compute<T>(
         &mut self,
-        pool: &mut ThreadPool<T>,
+        thread: &mut T,
         mode: ExecutionMode,
         key: &ValueRef,
         iv: &ValueRef,
@@ -169,61 +160,32 @@ impl<C: CtrCircuit> KeyStream<C> {
                 .preprocessed
                 .drain(block_count.min(self.preprocessed.len()));
             if vars.len() < block_count {
-                vars.extend(self.define_vars(pool.get_mut(), block_count - vars.len())?)
+                vars.extend(self.define_vars(thread, block_count - vars.len())?)
             }
             vars
         } else {
-            self.define_vars(pool.get_mut(), block_count)?
+            self.define_vars(thread, block_count)?
         };
 
-        let mut scope = pool.new_scope();
         for (i, (block, nonce, ctr)) in vars.iter().enumerate() {
-            scope.push(move |thread| {
-                Box::pin(compute_block::<T, C>(
-                    thread,
-                    mode,
-                    key.clone(),
-                    iv.clone(),
-                    block.clone(),
-                    nonce.clone(),
-                    ctr.clone(),
-                    explicit_nonce,
-                    (start_ctr + i) as u32,
-                ))
-            });
+            compute_block::<T, C>(
+                thread,
+                mode,
+                key.clone(),
+                iv.clone(),
+                block.clone(),
+                nonce.clone(),
+                ctr.clone(),
+                explicit_nonce,
+                (start_ctr + i) as u32,
+            )
+            .await?;
         }
-        scope
-            .wait()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
 
-        let keystream = pool.get_mut().array_from_values(&vars.flatten(len))?;
+        let keystream = thread.array_from_values(&vars.flatten(len))?;
 
         Ok(keystream)
     }
-}
-
-async fn preprocess_block<T, C>(
-    thread: &mut T,
-    key: ValueRef,
-    iv: ValueRef,
-    block: ValueRef,
-    nonce: ValueRef,
-    ctr: ValueRef,
-) -> Result<(), StreamCipherError>
-where
-    T: Load + Send,
-    C: CtrCircuit,
-{
-    thread
-        .load(
-            C::circuit(),
-            &[key.clone(), iv.clone(), nonce.clone(), ctr.clone()],
-            &[block.clone()],
-        )
-        .await
-        .map_err(StreamCipherError::from)
 }
 
 /// Computes one block of the keystream.

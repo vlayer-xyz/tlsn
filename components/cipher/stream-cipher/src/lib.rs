@@ -219,10 +219,8 @@ mod tests {
     use super::*;
 
     use mpz_garble::{
-        protocol::deap::mock::{
-            create_mock_deap_vm, MockFollower, MockFollowerThread, MockLeader, MockLeaderThread,
-        },
-        Memory, Vm,
+        protocol::deap::mock::{create_mock_deap_vm, MockFollower, MockLeader},
+        Memory,
     };
     use rstest::*;
 
@@ -230,38 +228,23 @@ mod tests {
         start_ctr: usize,
         key: [u8; 16],
         iv: [u8; 4],
-        thread_count: usize,
     ) -> (
-        (
-            MpcStreamCipher<C, MockLeaderThread>,
-            MpcStreamCipher<C, MockFollowerThread>,
-        ),
-        (MockLeader, MockFollower),
+        MpcStreamCipher<C, MockLeader>,
+        MpcStreamCipher<C, MockFollower>,
     ) {
-        let (mut leader_vm, mut follower_vm) = create_mock_deap_vm("test").await;
+        let (leader_vm, follower_vm) = create_mock_deap_vm();
 
-        let leader_thread = leader_vm.new_thread("key_config").await.unwrap();
-        let leader_key = leader_thread.new_public_input::<[u8; 16]>("key").unwrap();
-        let leader_iv = leader_thread.new_public_input::<[u8; 4]>("iv").unwrap();
+        let leader_key = leader_vm.new_public_input::<[u8; 16]>("key").unwrap();
+        let leader_iv = leader_vm.new_public_input::<[u8; 4]>("iv").unwrap();
 
-        leader_thread.assign(&leader_key, key).unwrap();
-        leader_thread.assign(&leader_iv, iv).unwrap();
+        leader_vm.assign(&leader_key, key).unwrap();
+        leader_vm.assign(&leader_iv, iv).unwrap();
 
-        let follower_thread = follower_vm.new_thread("key_config").await.unwrap();
-        let follower_key = follower_thread.new_public_input::<[u8; 16]>("key").unwrap();
-        let follower_iv = follower_thread.new_public_input::<[u8; 4]>("iv").unwrap();
+        let follower_key = follower_vm.new_public_input::<[u8; 16]>("key").unwrap();
+        let follower_iv = follower_vm.new_public_input::<[u8; 4]>("iv").unwrap();
 
-        follower_thread.assign(&follower_key, key).unwrap();
-        follower_thread.assign(&follower_iv, iv).unwrap();
-
-        let leader_thread_pool = leader_vm
-            .new_thread_pool("mock", thread_count)
-            .await
-            .unwrap();
-        let follower_thread_pool = follower_vm
-            .new_thread_pool("mock", thread_count)
-            .await
-            .unwrap();
+        follower_vm.assign(&follower_key, key).unwrap();
+        follower_vm.assign(&follower_iv, iv).unwrap();
 
         let leader_config = StreamCipherConfig::builder()
             .id("test")
@@ -275,13 +258,13 @@ mod tests {
             .build()
             .unwrap();
 
-        let mut leader = MpcStreamCipher::<C, _>::new(leader_config, leader_thread_pool);
+        let mut leader = MpcStreamCipher::<C, _>::new(leader_config, leader_vm);
         leader.set_key(leader_key, leader_iv);
 
-        let mut follower = MpcStreamCipher::<C, _>::new(follower_config, follower_thread_pool);
+        let mut follower = MpcStreamCipher::<C, _>::new(follower_config, follower_vm);
         follower.set_key(follower_key, follower_iv);
 
-        ((leader, follower), (leader_vm, follower_vm))
+        (leader, follower)
     }
 
     #[rstest]
@@ -294,8 +277,7 @@ mod tests {
 
         let msg = b"This is a test message which will be encrypted using AES-CTR.".to_vec();
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            create_test_pair::<Aes128Ctr>(1, key, iv, 8).await;
+        let (mut leader, mut follower) = create_test_pair::<Aes128Ctr>(1, key, iv).await;
 
         let leader_fut = async {
             let leader_encrypted_msg = leader
@@ -350,8 +332,7 @@ mod tests {
 
         let ciphertext = Aes128Ctr::apply_keystream(&key, &iv, 1, &explicit_nonce, &msg).unwrap();
 
-        let ((mut leader, mut follower), (mut leader_vm, mut follower_vm)) =
-            create_test_pair::<Aes128Ctr>(1, key, iv, 8).await;
+        let (mut leader, mut follower) = create_test_pair::<Aes128Ctr>(1, key, iv).await;
 
         let leader_fut = async {
             let leader_decrypted_msg = leader
@@ -386,7 +367,11 @@ mod tests {
         assert_eq!(leader_decrypted_msg, msg);
         assert_eq!(follower_encrypted_msg, ciphertext);
 
-        futures::try_join!(leader_vm.finalize(), follower_vm.finalize()).unwrap();
+        futures::try_join!(
+            leader.thread_mut().finalize(),
+            follower.thread_mut().finalize()
+        )
+        .unwrap();
     }
 
     #[rstest]
@@ -397,8 +382,7 @@ mod tests {
         let iv = [0u8; 4];
         let explicit_nonce = [0u8; 8];
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            create_test_pair::<Aes128Ctr>(1, key, iv, 8).await;
+        let (mut leader, mut follower) = create_test_pair::<Aes128Ctr>(1, key, iv).await;
 
         let leader_fut = async {
             leader
@@ -440,8 +424,7 @@ mod tests {
 
         let ciphertext = Aes128Ctr::apply_keystream(&key, &iv, 2, &explicit_nonce, &msg).unwrap();
 
-        let ((mut leader, mut follower), (mut leader_vm, mut follower_vm)) =
-            create_test_pair::<Aes128Ctr>(2, key, iv, 8).await;
+        let (mut leader, mut follower) = create_test_pair::<Aes128Ctr>(2, key, iv).await;
 
         futures::try_join!(leader.decode_key_private(), follower.decode_key_blind()).unwrap();
 
@@ -450,7 +433,11 @@ mod tests {
             follower.verify_plaintext(explicit_nonce.to_vec(), ciphertext)
         )
         .unwrap();
-        futures::try_join!(leader_vm.finalize(), follower_vm.finalize()).unwrap();
+        futures::try_join!(
+            leader.thread_mut().finalize(),
+            follower.thread_mut().finalize()
+        )
+        .unwrap();
     }
 
     #[rstest]
@@ -468,8 +455,7 @@ mod tests {
 
         let ciphertext = Aes128Ctr::apply_keystream(&key, &iv, 1, &explicit_nonce, &msg).unwrap();
 
-        let ((mut leader, mut follower), (mut leader_vm, mut follower_vm)) =
-            create_test_pair::<Aes128Ctr>(1, key, iv, 8).await;
+        let (mut leader, mut follower) = create_test_pair::<Aes128Ctr>(1, key, iv).await;
 
         let leader_fut = async {
             leader.preprocess(len).await.unwrap();
@@ -493,6 +479,10 @@ mod tests {
 
         assert_eq!(leader_decrypted_msg, msg);
 
-        futures::try_join!(leader_vm.finalize(), follower_vm.finalize()).unwrap();
+        futures::try_join!(
+            leader.thread_mut().finalize(),
+            follower.thread_mut().finalize()
+        )
+        .unwrap();
     }
 }

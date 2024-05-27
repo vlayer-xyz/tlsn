@@ -73,7 +73,7 @@ pub trait Prf {
 
 #[cfg(test)]
 mod tests {
-    use mpz_garble::{protocol::deap::mock::create_mock_deap_vm, Decode, Memory, Vm};
+    use mpz_garble::{protocol::deap::mock::create_mock_deap_vm, Decode, Memory};
 
     use hmac_sha256_circuits::{hmac_sha256_partial, prf, session_keys};
 
@@ -104,31 +104,22 @@ mod tests {
         let server_random: [u8; 32] = [96u8; 32];
         let ms = compute_ms(pms, client_random, server_random);
 
-        let (mut leader_vm, mut follower_vm) = create_mock_deap_vm("test").await;
-
-        let mut leader_test_thread = leader_vm.new_thread("test").await.unwrap();
-        let mut follower_test_thread = follower_vm.new_thread("test").await.unwrap();
+        let (leader_vm, follower_vm) = create_mock_deap_vm();
 
         // Setup public PMS for testing
-        let leader_pms = leader_test_thread
-            .new_public_input::<[u8; 32]>("pms")
-            .unwrap();
-        let follower_pms = follower_test_thread
-            .new_public_input::<[u8; 32]>("pms")
-            .unwrap();
+        let leader_pms = leader_vm.new_public_input::<[u8; 32]>("pms").unwrap();
+        let follower_pms = follower_vm.new_public_input::<[u8; 32]>("pms").unwrap();
 
-        leader_test_thread.assign(&leader_pms, pms).unwrap();
-        follower_test_thread.assign(&follower_pms, pms).unwrap();
+        leader_vm.assign(&leader_pms, pms).unwrap();
+        follower_vm.assign(&follower_pms, pms).unwrap();
 
         let mut leader = MpcPrf::new(
             PrfConfig::builder().role(Role::Leader).build().unwrap(),
-            leader_vm.new_thread("prf/0").await.unwrap(),
-            leader_vm.new_thread("prf/1").await.unwrap(),
+            leader_vm,
         );
         let mut follower = MpcPrf::new(
             PrfConfig::builder().role(Role::Follower).build().unwrap(),
-            follower_vm.new_thread("prf/0").await.unwrap(),
-            follower_vm.new_thread("prf/1").await.unwrap(),
+            follower_vm,
         );
 
         futures::try_join!(leader.setup(leader_pms), follower.setup(follower_pms)).unwrap();
@@ -155,13 +146,15 @@ mod tests {
 
         // Decode session keys
         let (leader_session_keys, follower_session_keys) = futures::try_join!(
-            async move {
-                leader_test_thread
+            async {
+                leader
+                    .thread_mut()
                     .decode(&[leader_cwk, leader_swk, leader_civ, leader_siv])
                     .await
             },
-            async move {
-                follower_test_thread
+            async {
+                follower
+                    .thread_mut()
                     .decode(&[follower_cwk, follower_swk, follower_civ, follower_siv])
                     .await
             }

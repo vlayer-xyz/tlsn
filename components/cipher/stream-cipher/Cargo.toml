@@ -11,6 +11,7 @@ edition = "2021"
 [features]
 default = ["mock"]
 tracing = ["dep:tracing"]
+rayon = ["mpz-garble/rayon"]
 mock = []
 
 [dependencies]

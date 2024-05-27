@@ -51,8 +51,7 @@ pub(crate) struct VerifyData {
 pub struct MpcPrf<E> {
     config: PrfConfig,
     state: state::State,
-    thread_0: E,
-    thread_1: E,
+    thread: E,
 }
 
 impl<E> Debug for MpcPrf<E> {
@@ -69,13 +68,17 @@ where
     E: Load + Memory + Execute + DecodePrivate + Send,
 {
     /// Creates a new instance of the PRF.
-    pub fn new(config: PrfConfig, thread_0: E, thread_1: E) -> MpcPrf<E> {
+    pub fn new(config: PrfConfig, thread: E) -> MpcPrf<E> {
         MpcPrf {
             config,
             state: state::State::Initialized,
-            thread_0,
-            thread_1,
+            thread,
         }
+    }
+
+    /// Returns a mutable reference to the underlying thread.
+    pub fn thread_mut(&mut self) -> &mut E {
+        &mut self.thread
     }
 
     /// Executes a circuit which computes TLS session keys.
@@ -97,13 +100,13 @@ where
             .expect("session keys circuit is set");
 
         if let Some((client_random, server_random)) = randoms {
-            self.thread_0
+            self.thread
                 .assign(&randoms_refs.client_random, client_random)?;
-            self.thread_0
+            self.thread
                 .assign(&randoms_refs.server_random, server_random)?;
         }
 
-        self.thread_0
+        self.thread
             .execute(
                 circ.clone(),
                 &[pms, randoms_refs.client_random, randoms_refs.server_random],
@@ -140,11 +143,10 @@ where
         let circ = CLIENT_VD_CIRC.get().expect("client vd circuit is set");
 
         if let Some(handshake_hash) = handshake_hash {
-            self.thread_0
-                .assign(&cf_vd.handshake_hash, handshake_hash)?;
+            self.thread.assign(&cf_vd.handshake_hash, handshake_hash)?;
         }
 
-        self.thread_0
+        self.thread
             .execute(
                 circ.clone(),
                 &[
@@ -157,12 +159,12 @@ where
             .await?;
 
         let vd = if handshake_hash.is_some() {
-            let mut outputs = self.thread_0.decode_private(&[cf_vd.vd]).await?;
+            let mut outputs = self.thread.decode_private(&[cf_vd.vd]).await?;
             let vd: [u8; 12] = outputs.remove(0).try_into().expect("vd is 12 bytes");
 
             Some(vd)
         } else {
-            self.thread_0.decode_blind(&[cf_vd.vd]).await?;
+            self.thread.decode_blind(&[cf_vd.vd]).await?;
 
             None
         };
@@ -182,11 +184,10 @@ where
         let circ = SERVER_VD_CIRC.get().expect("server vd circuit is set");
 
         if let Some(handshake_hash) = handshake_hash {
-            self.thread_1
-                .assign(&sf_vd.handshake_hash, handshake_hash)?;
+            self.thread.assign(&sf_vd.handshake_hash, handshake_hash)?;
         }
 
-        self.thread_1
+        self.thread
             .execute(
                 circ.clone(),
                 &[
@@ -199,12 +200,12 @@ where
             .await?;
 
         let vd = if handshake_hash.is_some() {
-            let mut outputs = self.thread_1.decode_private(&[sf_vd.vd]).await?;
+            let mut outputs = self.thread.decode_private(&[sf_vd.vd]).await?;
             let vd: [u8; 12] = outputs.remove(0).try_into().expect("vd is 12 bytes");
 
             Some(vd)
         } else {
-            self.thread_1.decode_blind(&[sf_vd.vd]).await?;
+            self.thread.decode_blind(&[sf_vd.vd]).await?;
 
             None
         };
@@ -231,11 +232,11 @@ where
 
         // Perform pre-computation for all circuits.
         let (randoms, hash_state, keys) =
-            setup_session_keys(&mut self.thread_0, pms.clone(), visibility).await?;
+            setup_session_keys(&mut self.thread, pms.clone(), visibility).await?;
 
         let (cf_vd, sf_vd) = futures::try_join!(
-            setup_finished_msg(&mut self.thread_0, Msg::Cf, hash_state.clone(), visibility),
-            setup_finished_msg(&mut self.thread_1, Msg::Sf, hash_state.clone(), visibility),
+            setup_finished_msg(&mut self.thread, Msg::Cf, hash_state.clone(), visibility),
+            setup_finished_msg(&mut self.thread, Msg::Sf, hash_state.clone(), visibility),
         )?;
 
         self.state = state::State::SessionKeys(state::SessionKeys {

@@ -17,17 +17,15 @@ criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
 
 async fn setup() {
-    let (mut leader_vm, mut follower_vm) = create_mock_deap_vm("bench").await;
+    let (mut leader_vm, mut follower_vm) = create_mock_deap_vm();
 
     let mut leader = MpcPrf::new(
         PrfConfig::builder().role(Role::Leader).build().unwrap(),
-        leader_vm.new_thread("prf/0").await.unwrap(),
-        leader_vm.new_thread("prf/1").await.unwrap(),
+        leader_vm,
     );
     let mut follower = MpcPrf::new(
         PrfConfig::builder().role(Role::Follower).build().unwrap(),
-        follower_vm.new_thread("prf/0").await.unwrap(),
-        follower_vm.new_thread("prf/1").await.unwrap(),
+        follower_vm,
     );
 
     let leader_thread = leader_vm.new_thread("setup").await.unwrap();
@@ -40,17 +38,15 @@ async fn setup() {
 }
 
 async fn prf() {
-    let (mut leader_vm, mut follower_vm) = create_mock_deap_vm("bench").await;
+    let (mut leader_vm, mut follower_vm) = create_mock_deap_vm();
 
     let mut leader = MpcPrf::new(
         PrfConfig::builder().role(Role::Leader).build().unwrap(),
-        leader_vm.new_thread("prf/0").await.unwrap(),
-        leader_vm.new_thread("prf/1").await.unwrap(),
+        leader_vm,
     );
     let mut follower = MpcPrf::new(
         PrfConfig::builder().role(Role::Follower).build().unwrap(),
-        follower_vm.new_thread("prf/0").await.unwrap(),
-        follower_vm.new_thread("prf/1").await.unwrap(),
+        follower_vm,
     );
 
     let pms = [42u8; 32];

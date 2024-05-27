@@ -86,6 +86,8 @@ async fn bench_stream_cipher_zk(len: usize) {
     let mut follower = MpcStreamCipher::<Aes128Ctr, _>::new(follower_config, follower_vm);
     follower.set_key(follower_key, follower_iv);
 
+    futures::try_join!(leader.decode_key_private(), follower.decode_key_blind()).unwrap();
+
     let plaintext = vec![0u8; len];
     let explicit_nonce = [0u8; 8];
     let ciphertext = Aes128Ctr::apply_keystream(&key, &iv, 2, &explicit_nonce, &plaintext).unwrap();

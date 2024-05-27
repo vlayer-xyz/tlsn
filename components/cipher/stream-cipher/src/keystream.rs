@@ -113,14 +113,19 @@ impl<C: CtrCircuit> KeyStream<C> {
         let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
         let vars = self.define_vars(thread, block_count)?;
 
-        for (block, nonce, ctr) in vars.iter() {
-            thread
-                .load(
+        let calls = vars
+            .iter()
+            .map(|(block, nonce, ctr)| {
+                (
                     C::circuit(),
-                    &[key.clone(), iv.clone(), nonce.clone(), ctr.clone()],
-                    &[block.clone()],
+                    vec![key.clone(), iv.clone(), nonce.clone(), ctr.clone()],
+                    vec![block.clone()],
                 )
-                .await?;
+            })
+            .collect::<Vec<_>>();
+
+        for (circ, inputs, outputs) in calls {
+            thread.load(circ, &inputs, &outputs).await?;
         }
 
         self.preprocessed.extend(vars);
@@ -167,67 +172,51 @@ impl<C: CtrCircuit> KeyStream<C> {
             self.define_vars(thread, block_count)?
         };
 
-        for (i, (block, nonce, ctr)) in vars.iter().enumerate() {
-            compute_block::<T, C>(
-                thread,
-                mode,
-                key.clone(),
-                iv.clone(),
-                block.clone(),
-                nonce.clone(),
-                ctr.clone(),
-                explicit_nonce,
-                (start_ctr + i) as u32,
-            )
-            .await?;
+        let mut calls = Vec::with_capacity(vars.len());
+        let mut inputs = Vec::with_capacity(vars.len() * 4);
+        for (i, (block, nonce_ref, ctr_ref)) in vars.iter().enumerate() {
+            thread.assign(nonce_ref, explicit_nonce)?;
+            thread.assign(ctr_ref, ((start_ctr + i) as u32).to_be_bytes())?;
+
+            inputs.push(key.clone());
+            inputs.push(iv.clone());
+            inputs.push(nonce_ref.clone());
+            inputs.push(ctr_ref.clone());
+
+            calls.push((
+                C::circuit(),
+                vec![key.clone(), iv.clone(), nonce_ref.clone(), ctr_ref.clone()],
+                vec![block.clone()],
+            ));
+        }
+
+        match mode {
+            ExecutionMode::Mpc => {
+                thread.commit(&inputs).await?;
+                for (circ, inputs, outputs) in calls {
+                    thread.execute(circ, &inputs, &outputs).await?;
+                }
+            }
+            ExecutionMode::Prove => {
+                // Note that after the circuit execution, the value of `block` can be considered as
+                // implicitly authenticated since `key` and `iv` have already been authenticated earlier
+                // and `nonce_ref` and `ctr_ref` are public.
+                // [Prove::prove] will **not** be called on `block` at any later point.
+                thread.commit_prove(&inputs).await?;
+                for (circ, inputs, outputs) in calls {
+                    thread.execute_prove(circ, &inputs, &outputs).await?;
+                }
+            }
+            ExecutionMode::Verify => {
+                thread.commit_verify(&inputs).await?;
+                for (circ, inputs, outputs) in calls {
+                    thread.execute_verify(circ, &inputs, &outputs).await?;
+                }
+            }
         }
 
         let keystream = thread.array_from_values(&vars.flatten(len))?;
 
         Ok(keystream)
     }
-}
-
-/// Computes one block of the keystream.
-async fn compute_block<T, C>(
-    thread: &mut T,
-    mode: ExecutionMode,
-    key: ValueRef,
-    iv: ValueRef,
-    block: ValueRef,
-    nonce_ref: ValueRef,
-    ctr_ref: ValueRef,
-    nonce: C::NONCE,
-    ctr: u32,
-) -> Result<(), StreamCipherError>
-where
-    T: Memory + Execute + Prove + Verify + Send,
-    C: CtrCircuit,
-{
-    thread.assign(&nonce_ref, nonce)?;
-    thread.assign(&ctr_ref, ctr.to_be_bytes())?;
-
-    match mode {
-        ExecutionMode::Mpc => {
-            thread
-                .execute(C::circuit(), &[key, iv, nonce_ref, ctr_ref], &[block])
-                .await?;
-        }
-        ExecutionMode::Prove => {
-            // Note that after the circuit execution, the value of `block` can be considered as
-            // implicitly authenticated since `key` and `iv` have already been authenticated earlier
-            // and `nonce_ref` and `ctr_ref` are public.
-            // [Prove::prove] will **not** be called on `block` at any later point.
-            thread
-                .execute_prove(C::circuit(), &[key, iv, nonce_ref, ctr_ref], &[block])
-                .await?;
-        }
-        ExecutionMode::Verify => {
-            thread
-                .execute_verify(C::circuit(), &[key, iv, nonce_ref, ctr_ref], &[block])
-                .await?;
-        }
-    }
-
-    Ok(())
 }

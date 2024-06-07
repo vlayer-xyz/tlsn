@@ -2,18 +2,12 @@
 members = ["hmac-sha256-circuits", "hmac-sha256"]
 resolver = "2"
 
-[patch.'https://github.com/privacy-scaling-explorations/mpz']
-mpz-circuits = { path = "../../../mpz/crates/mpz-circuits" }
-mpz-garble = { path = "../../../mpz/crates/mpz-garble" }
-
-[patch.'https://github.com//tlsnotary/tlsn-utils']
-tlsn-utils = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "1d27bd7" }
-tlsn-utils-aio = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "1d27bd7" }
-
 [workspace.dependencies]
 # tlsn
-mpz-circuits = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "9f7403b" }
-mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "9f7403b" }
+mpz-circuits = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
+mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
+mpz-ot = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
+mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
 
 # async
 async-trait = "0.1"

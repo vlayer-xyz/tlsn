@@ -13,6 +13,7 @@ name = "hmac_sha256"
 
 [features]
 default = ["mock"]
+rayon = ["mpz-garble/rayon"]
 tracing = ["dep:tracing", "tlsn-hmac-sha256-circuits/tracing"]
 mock = []
 
@@ -30,6 +31,8 @@ derive_builder = "0.12"
 enum-try-as-inner = "0.1"
 
 [dev-dependencies]
+mpz-common = { workspace = true, features = ["test-utils"] }
+mpz-ot = { workspace = true, features = ["ideal"] }
 criterion = { workspace = true, features = ["async_tokio"] }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 

@@ -9,15 +9,17 @@ pub use config::{AesGcmConfig, AesGcmConfigBuilder, AesGcmConfigBuilderError, Ro
 
 use crate::{
     msg::{AeadMessage, TagShare},
-    Aead, AeadChannel, AeadError,
+    Aead, AeadError,
 };
 
 use async_trait::async_trait;
-use futures::{SinkExt, StreamExt, TryFutureExt};
 
 use block_cipher::{Aes128, BlockCipher};
+use futures::TryFutureExt;
+use mpz_common::Context;
 use mpz_core::commit::HashCommit;
 use mpz_garble::value::ValueRef;
+use serio::{SinkExt, StreamExt};
 use tlsn_stream_cipher::{Aes128Ctr, StreamCipher};
 use tlsn_universal_hash::UniversalHash;
 use utils_aio::expect_msg_or_err;
@@ -26,19 +28,19 @@ pub(crate) use tag::AesGcmTagShare;
 use tag::{build_ghash_data, AES_GCM_TAG_LEN};
 
 /// An implementation of 2PC AES-GCM.
-pub struct MpcAesGcm {
+pub struct MpcAesGcm<Ctx> {
     config: AesGcmConfig,
-    channel: AeadChannel,
+    context: Ctx,
     aes_block: Box<dyn BlockCipher<Aes128>>,
     aes_ctr: Box<dyn StreamCipher<Aes128Ctr>>,
     ghash: Box<dyn UniversalHash>,
 }
 
-impl std::fmt::Debug for MpcAesGcm {
+impl<Ctx> std::fmt::Debug for MpcAesGcm<Ctx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MpcAesGcm")
             .field("config", &self.config)
-            .field("channel", &"AeadChannel {{ ... }}")
+            .field("context", &"Context {{ ... }}")
             .field("aes_block", &"BlockCipher {{ ... }}")
             .field("aes_ctr", &"StreamCipher {{ ... }}")
             .field("ghash", &"UniversalHash {{ ... }}")
@@ -46,22 +48,22 @@ impl std::fmt::Debug for MpcAesGcm {
     }
 }
 
-impl MpcAesGcm {
+impl<Ctx: Context> MpcAesGcm<Ctx> {
     /// Creates a new instance of [`MpcAesGcm`].
     #[cfg_attr(
         feature = "tracing",
-        tracing::instrument(level = "info", skip(channel, aes_block, aes_ctr, ghash), ret)
+        tracing::instrument(level = "info", skip(context, aes_block, aes_ctr, ghash), ret)
     )]
     pub fn new(
         config: AesGcmConfig,
-        channel: AeadChannel,
+        context: Ctx,
         aes_block: Box<dyn BlockCipher<Aes128>>,
         aes_ctr: Box<dyn StreamCipher<Aes128Ctr>>,
         ghash: Box<dyn UniversalHash>,
     ) -> Self {
         Self {
             config,
-            channel,
+            context,
             aes_block,
             aes_ctr,
             ghash,
@@ -112,23 +114,23 @@ impl MpcAesGcm {
             .compute_tag_share(explicit_nonce, aad, ciphertext.clone())
             .await?;
 
+        let channel = self.context.io_mut();
         let tag = match self.config.role() {
             Role::Leader => {
                 // Send commitment of tag share to follower.
                 let (tag_share_decommitment, tag_share_commitment) =
                     TagShare::from(tag_share).hash_commit();
 
-                self.channel
+                channel
                     .send(AeadMessage::TagShareCommitment(tag_share_commitment))
                     .await?;
 
-                // Expect tag share from follower.
-                let msg = expect_msg_or_err!(self.channel, AeadMessage::TagShare)?;
+                let msg = expect_msg_or_err!(channel, AeadMessage::TagShare)?;
 
                 let other_tag_share = AesGcmTagShare::from_unchecked(&msg.share)?;
 
                 // Send decommitment (tag share) to follower.
-                self.channel
+                channel
                     .send(AeadMessage::TagShareDecommitment(tag_share_decommitment))
                     .await?;
 
@@ -136,16 +138,15 @@ impl MpcAesGcm {
             }
             Role::Follower => {
                 // Wait for commitment from leader.
-                let commitment = expect_msg_or_err!(self.channel, AeadMessage::TagShareCommitment)?;
+                let commitment = expect_msg_or_err!(channel, AeadMessage::TagShareCommitment)?;
 
                 // Send tag share to leader.
-                self.channel
+                channel
                     .send(AeadMessage::TagShare(tag_share.into()))
                     .await?;
 
                 // Expect decommitment (tag share) from leader.
-                let decommitment =
-                    expect_msg_or_err!(self.channel, AeadMessage::TagShareDecommitment)?;
+                let decommitment = expect_msg_or_err!(channel, AeadMessage::TagShareDecommitment)?;
 
                 // Verify decommitment.
                 decommitment.verify(&commitment).map_err(|_| {
@@ -187,7 +188,7 @@ impl MpcAesGcm {
 }
 
 #[async_trait]
-impl Aead for MpcAesGcm {
+impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "info", err))]
     async fn set_key(&mut self, key: ValueRef, iv: ValueRef) -> Result<(), AeadError> {
         self.aes_block.set_key(key.clone());
@@ -436,18 +437,17 @@ impl Aead for MpcAesGcm {
 
 #[cfg(test)]
 mod tests {
-    use super::{mock::create_mock_aes_gcm_pair, *};
-    use crate::Aead;
-
-    use mpz_garble::{
-        protocol::deap::mock::{create_mock_deap_vm, MockFollower, MockLeader},
-        Memory, Vm,
+    use crate::{
+        aes_gcm::{mock::create_mock_aes_gcm_pair, AesGcmConfigBuilder, MpcAesGcm, Role},
+        Aead, AeadError,
     };
-
     use ::aes_gcm::{
         aead::{AeadInPlace, KeyInit},
         Aes128Gcm, Nonce,
     };
+    use mpz_common::executor::STExecutor;
+    use mpz_garble::{protocol::deap::mock::create_mock_deap_vm, Memory};
+    use serio::channel::MemoryDuplex;
 
     fn reference_impl(
         key: &[u8],
@@ -471,30 +471,31 @@ mod tests {
     async fn setup_pair(
         key: Vec<u8>,
         iv: Vec<u8>,
-    ) -> ((MpcAesGcm, MpcAesGcm), (MockLeader, MockFollower)) {
-        let (mut leader_vm, mut follower_vm) = create_mock_deap_vm("test_vm").await;
+    ) -> (
+        MpcAesGcm<STExecutor<MemoryDuplex>>,
+        MpcAesGcm<STExecutor<MemoryDuplex>>,
+    ) {
+        let (leader_vm, follower_vm) = create_mock_deap_vm();
 
-        let leader_thread = leader_vm.new_thread("test_thread").await.unwrap();
-        let leader_key = leader_thread
+        let leader_key = leader_vm
             .new_public_array_input::<u8>("key", key.len())
             .unwrap();
-        let leader_iv = leader_thread
+        let leader_iv = leader_vm
             .new_public_array_input::<u8>("iv", iv.len())
             .unwrap();
 
-        leader_thread.assign(&leader_key, key.clone()).unwrap();
-        leader_thread.assign(&leader_iv, iv.clone()).unwrap();
+        leader_vm.assign(&leader_key, key.clone()).unwrap();
+        leader_vm.assign(&leader_iv, iv.clone()).unwrap();
 
-        let follower_thread = follower_vm.new_thread("test_thread").await.unwrap();
-        let follower_key = follower_thread
+        let follower_key = follower_vm
             .new_public_array_input::<u8>("key", key.len())
             .unwrap();
-        let follower_iv = follower_thread
+        let follower_iv = follower_vm
             .new_public_array_input::<u8>("iv", iv.len())
             .unwrap();
 
-        follower_thread.assign(&follower_key, key.clone()).unwrap();
-        follower_thread.assign(&follower_iv, iv.clone()).unwrap();
+        follower_vm.assign(&follower_key, key.clone()).unwrap();
+        follower_vm.assign(&follower_iv, iv.clone()).unwrap();
 
         let leader_config = AesGcmConfigBuilder::default()
             .id("test".to_string())
@@ -509,8 +510,7 @@ mod tests {
 
         let (mut leader, mut follower) = create_mock_aes_gcm_pair(
             "test",
-            &mut leader_vm,
-            &mut follower_vm,
+            (leader_vm, follower_vm),
             leader_config,
             follower_config,
         )
@@ -524,7 +524,7 @@ mod tests {
 
         futures::try_join!(leader.setup(), follower.setup()).unwrap();
 
-        ((leader, follower), (leader_vm, follower_vm))
+        (leader, follower)
     }
 
     #[tokio::test]
@@ -535,8 +535,7 @@ mod tests {
         let plaintext = vec![1u8; 32];
         let aad = vec![2u8; 12];
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            setup_pair(key.clone(), iv.clone()).await;
+        let (mut leader, mut follower) = setup_pair(key.clone(), iv.clone()).await;
 
         let (leader_ciphertext, follower_ciphertext) = tokio::try_join!(
             leader.encrypt_private(explicit_nonce.clone(), plaintext.clone(), aad.clone(),),
@@ -559,8 +558,7 @@ mod tests {
         let plaintext = vec![1u8; 32];
         let aad = vec![2u8; 12];
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            setup_pair(key.clone(), iv.clone()).await;
+        let (mut leader, mut follower) = setup_pair(key.clone(), iv.clone()).await;
 
         let (leader_ciphertext, follower_ciphertext) = tokio::try_join!(
             leader.encrypt_public(explicit_nonce.clone(), plaintext.clone(), aad.clone(),),
@@ -584,8 +582,7 @@ mod tests {
         let aad = vec![2u8; 12];
         let ciphertext = reference_impl(&key, &iv, &explicit_nonce, &plaintext, &aad);
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            setup_pair(key.clone(), iv.clone()).await;
+        let (mut leader, mut follower) = setup_pair(key.clone(), iv.clone()).await;
 
         let (leader_plaintext, _) = tokio::try_join!(
             leader.decrypt_private(explicit_nonce.clone(), ciphertext.clone(), aad.clone(),),
@@ -611,8 +608,7 @@ mod tests {
         let mut corrupted = ciphertext.clone();
         corrupted[len - 1] -= 1;
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            setup_pair(key.clone(), iv.clone()).await;
+        let (mut leader, mut follower) = setup_pair(key.clone(), iv.clone()).await;
 
         // leader receives corrupted tag
         let err = tokio::try_join!(
@@ -622,8 +618,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, AeadError::CorruptedTag));
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            setup_pair(key.clone(), iv.clone()).await;
+        let (mut leader, mut follower) = setup_pair(key.clone(), iv.clone()).await;
 
         // follower receives corrupted tag
         let err = tokio::try_join!(
@@ -643,8 +638,7 @@ mod tests {
         let aad = vec![2u8; 12];
         let ciphertext = reference_impl(&key, &iv, &explicit_nonce, &plaintext, &aad);
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            setup_pair(key.clone(), iv.clone()).await;
+        let (mut leader, mut follower) = setup_pair(key.clone(), iv.clone()).await;
 
         let (leader_plaintext, follower_plaintext) = tokio::try_join!(
             leader.decrypt_public(explicit_nonce.clone(), ciphertext.clone(), aad.clone(),),
@@ -671,8 +665,7 @@ mod tests {
         let mut corrupted = ciphertext.clone();
         corrupted[len - 1] -= 1;
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            setup_pair(key.clone(), iv.clone()).await;
+        let (mut leader, mut follower) = setup_pair(key.clone(), iv.clone()).await;
 
         // Leader receives corrupted tag.
         let err = tokio::try_join!(
@@ -682,8 +675,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, AeadError::CorruptedTag));
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            setup_pair(key.clone(), iv.clone()).await;
+        let (mut leader, mut follower) = setup_pair(key.clone(), iv.clone()).await;
 
         // Follower receives corrupted tag.
         let err = tokio::try_join!(
@@ -705,8 +697,7 @@ mod tests {
 
         let len = ciphertext.len();
 
-        let ((mut leader, mut follower), (_leader_vm, _follower_vm)) =
-            setup_pair(key.clone(), iv.clone()).await;
+        let (mut leader, mut follower) = setup_pair(key.clone(), iv.clone()).await;
 
         tokio::try_join!(
             leader.verify_tag(explicit_nonce.clone(), ciphertext.clone(), aad.clone()),

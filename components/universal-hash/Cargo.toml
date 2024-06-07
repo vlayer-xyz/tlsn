@@ -16,11 +16,11 @@ ideal = ["dep:ghash_rc"]
 
 [dependencies]
 # tlsn
-mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
-mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a", features = ["ideal"] }
-mpz-fields = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
-mpz-share-conversion-core = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
-mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
+mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d" }
+mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d", features = ["ideal"] }
+mpz-fields = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d" }
+mpz-share-conversion-core = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d" }
+mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d" }
 
 ghash_rc = { package = "ghash", version = "0.5", optional = true }
 
@@ -38,10 +38,10 @@ tracing = { version = "0.1", optional = true }
 derive_builder = "0.12"
 
 [dev-dependencies]
-mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a", features = [
+mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d", features = [
     "test-utils",
 ] }
-mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a", features = [
+mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d", features = [
     "ideal",
 ] }
 

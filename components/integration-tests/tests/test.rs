@@ -3,18 +3,13 @@ use aead::{
     Aead,
 };
 use block_cipher::{Aes128, BlockCipherConfigBuilder, MpcBlockCipher};
-use futures::StreamExt;
-use hmac_sha256::{MpcPrf, Prf, PrfConfig, SessionKeys};
-use key_exchange::{KeyExchange, KeyExchangeConfig, MpcKeyExchange, Role as KeyExchangeRole};
-use mpz_common::{
-    executor::{test_mt_executor, STExecutor},
-    try_join,
-};
+use hmac_sha256::{MpcPrf, PrfConfig, SessionKeys};
+use key_exchange::{KeyExchangeConfig, MpcKeyExchange, Role as KeyExchangeRole};
+use mpz_common::executor::test_mt_executor;
 use mpz_core::{prg::Prg, Block};
-use mpz_garble::{config::Role as GarbleRole, protocol::deap::mock::create_mock_deap_vm};
+use mpz_fields::{gf2_128::Gf2_128, p256::P256};
 use mpz_garble::{config::Role, protocol::deap::DEAPThread};
 use mpz_ole::rot::{OLEReceiver, OLESender};
-use mpz_ole::{OLEReceiver as OLEReceive, OLESender as OLESend};
 use mpz_ot::{
     chou_orlandi::{
         Receiver as BaseReceiver, ReceiverConfig as BaseReceiverConfig, Sender as BaseSender,
@@ -24,7 +19,7 @@ use mpz_ot::{
     OTSetup,
 };
 use mpz_share_conversion::{ShareConversionReceiver, ShareConversionSender};
-use p256::{elliptic_curve::consts::P256, NonZeroScalar, PublicKey, SecretKey};
+use p256::{NonZeroScalar, PublicKey, SecretKey};
 use rand::SeedableRng;
 use tlsn_stream_cipher::{Aes128Ctr, MpcStreamCipher, StreamCipherConfig};
 use tlsn_universal_hash::ghash::{Ghash, GhashConfig};
@@ -130,15 +125,14 @@ async fn test_components() {
     let leader_ole_sender = OLESender::new(leader_ot_sender.clone());
     let leader_ole_receiver = OLEReceiver::new(leader_ot_recvr.clone());
 
-    let leader_p256_sender = ShareConversionSender::<_, P256>::new(leader_ole_sender.clone());
-    let leader_p256_receiver = ShareConversionSender::<_, P256>::new(leader_ole_receiver.clone());
+    let leader_p256_sender = ShareConversionSender::<_, P256>::new(leader_ole_sender);
+    let leader_p256_receiver = ShareConversionReceiver::<_, P256>::new(leader_ole_receiver);
 
     let follower_ole_sender = OLESender::new(follower_ot_sender.clone());
     let follower_ole_receiver = OLEReceiver::new(follower_ot_recvr.clone());
 
-    let follower_p256_sender = ShareConversionSender::<_, P256>::new(follower_ole_sender.clone());
-    let follower_p256_receiver =
-        ShareConversionSender::<_, P256>::new(follower_ole_receiver.clone());
+    let follower_p256_sender = ShareConversionSender::<_, P256>::new(follower_ole_sender);
+    let follower_p256_receiver = ShareConversionReceiver::<_, P256>::new(follower_ole_receiver);
 
     let mut leader_ke = MpcKeyExchange::new(
         KeyExchangeConfig::builder()
@@ -209,17 +203,27 @@ async fn test_components() {
     )
     .unwrap();
 
+    let ctx_a1 = exec_a.new_thread().await.unwrap();
+    let ctx_a2 = exec_a.new_thread().await.unwrap();
+
+    let ctx_b1 = exec_b.new_thread().await.unwrap();
+    let ctx_b2 = exec_b.new_thread().await.unwrap();
+
     let block_cipher_config = BlockCipherConfigBuilder::default()
         .id("aes")
         .build()
         .unwrap();
     let leader_block_cipher = MpcBlockCipher::<Aes128, _>::new(
         block_cipher_config.clone(),
-        leader_vm.new_thread("block_cipher").await.unwrap(),
+        deap_leader.new_thread(ctx_a1, leader_ot_sender.clone(), leader_ot_recvr.clone()),
     );
     let follower_block_cipher = MpcBlockCipher::<Aes128, _>::new(
         block_cipher_config,
-        follower_vm.new_thread("block_cipher").await.unwrap(),
+        deap_follower.new_thread(
+            ctx_b1,
+            follower_ot_sender.clone(),
+            follower_ot_recvr.clone(),
+        ),
     );
 
     let stream_cipher_config = StreamCipherConfig::builder()
@@ -229,41 +233,36 @@ async fn test_components() {
         .unwrap();
     let leader_stream_cipher = MpcStreamCipher::<Aes128Ctr, _>::new(
         stream_cipher_config.clone(),
-        leader_vm.new_thread_pool("aes-ctr", 4).await.unwrap(),
+        deap_leader.new_thread(ctx_a2, leader_ot_sender.clone(), leader_ot_recvr.clone()),
     );
     let follower_stream_cipher = MpcStreamCipher::<Aes128Ctr, _>::new(
         stream_cipher_config,
-        follower_vm.new_thread_pool("aes-ctr", 4).await.unwrap(),
+        deap_follower.new_thread(
+            ctx_b2,
+            follower_ot_sender.clone(),
+            follower_ot_recvr.clone(),
+        ),
     );
 
-    let mut leader_gf2 = ff::ConverterSender::<Gf2_128, _>::new(
-        ff::SenderConfig::builder()
-            .id("gf2")
-            .record()
-            .build()
-            .unwrap(),
-        leader_ot_sender.clone(),
-        leader_mux.get_channel("gf2").await.unwrap(),
-    );
+    let ole_sender = OLESender::new(leader_ot_sender.clone());
+    let ole_receiver = OLEReceiver::new(follower_ot_recvr.clone());
 
-    let mut follower_gf2 = ff::ConverterReceiver::<Gf2_128, _>::new(
-        ff::ReceiverConfig::builder()
-            .id("gf2")
-            .record()
-            .build()
-            .unwrap(),
-        follower_ot_recvr.clone(),
-        follower_mux.get_channel("gf2").await.unwrap(),
-    );
+    let sender_gf2 = ShareConversionSender::<_, Gf2_128>::new(ole_sender);
+    let receiver_gf2 = ShareConversionReceiver::<_, Gf2_128>::new(ole_receiver);
 
     let ghash_config = GhashConfig::builder()
-        .id("aes_gcm/ghash")
         .initial_block_count(64)
         .build()
         .unwrap();
 
-    let leader_ghash = Ghash::new(ghash_config.clone(), leader_gf2.handle().unwrap());
-    let follower_ghash = Ghash::new(ghash_config, follower_gf2.handle().unwrap());
+    let ctx_a = exec_a.new_thread().await.unwrap();
+    let ctx_b = exec_b.new_thread().await.unwrap();
+
+    let leader_ghash = Ghash::new(ghash_config.clone(), sender_gf2, ctx_a);
+    let follower_ghash = Ghash::new(ghash_config.clone(), receiver_gf2, ctx_b);
+
+    let ctx_a = exec_a.new_thread().await.unwrap();
+    let ctx_b = exec_b.new_thread().await.unwrap();
 
     let mut leader_aead = MpcAesGcm::new(
         AesGcmConfig::builder()
@@ -271,7 +270,7 @@ async fn test_components() {
             .role(AesGcmRole::Leader)
             .build()
             .unwrap(),
-        leader_mux.get_channel("aes_gcm").await.unwrap(),
+        ctx_a,
         Box::new(leader_block_cipher),
         Box::new(leader_stream_cipher),
         Box::new(leader_ghash),
@@ -283,7 +282,7 @@ async fn test_components() {
             .role(AesGcmRole::Follower)
             .build()
             .unwrap(),
-        follower_mux.get_channel("aes_gcm").await.unwrap(),
+        ctx_b,
         Box::new(follower_block_cipher),
         Box::new(follower_stream_cipher),
         Box::new(follower_ghash),
@@ -339,8 +338,5 @@ async fn test_components() {
     )
     .unwrap();
 
-    follower_ot_sender.shutdown().await.unwrap();
-
-    tokio::try_join!(leader_vm.finalize(), follower_vm.finalize()).unwrap();
-    tokio::try_join!(leader_gf2.reveal(), follower_gf2.verify()).unwrap();
+    tokio::try_join!(deap_leader.finalize(), deap_follower.finalize()).unwrap();
 }

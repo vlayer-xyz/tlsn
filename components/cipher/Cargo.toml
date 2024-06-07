@@ -2,19 +2,11 @@
 members = ["stream-cipher", "block-cipher"]
 resolver = "2"
 
-[patch.'https://github.com/privacy-scaling-explorations/mpz']
-mpz-circuits = { path = "../../../mpz/crates/mpz-circuits" }
-mpz-garble = { path = "../../../mpz/crates/mpz-garble" }
-
-[patch.'https://github.com//tlsnotary/tlsn-utils']
-tlsn-utils = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "1d27bd7" }
-tlsn-utils-aio = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "1d27bd7" }
-
 [workspace.dependencies]
 # tlsn
-mpz-circuits = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "9f7403b" }
-mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "9f7403b" }
-tlsn-utils = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "51f313d" }
+mpz-circuits = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d" }
+mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d" }
+tlsn-utils = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "6e0be94" }
 
 # crypto
 aes = "0.8"

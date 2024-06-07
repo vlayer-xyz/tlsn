@@ -28,8 +28,9 @@ tlsn-universal-hash = { path = "../universal-hash" }
 mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d" }
 mpz-ot = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d", optional = true, features = ["ideal"] }
 mpz-garble = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d" }
-tlsn-utils-aio = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "51f313d" }
+tlsn-utils-aio = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "6e0be94" }
 mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "b28f69d" }
+serio = { git = "https://github.com/tlsnotary/tlsn-utils", rev = "6e0be94" }
 
 async-trait = "0.1"
 derive_builder = "0.12"

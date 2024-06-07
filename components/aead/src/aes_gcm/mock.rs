@@ -1,12 +1,12 @@
 //! Mock implementation of AES-GCM for testing purposes.
 
 use block_cipher::{BlockCipherConfig, MpcBlockCipher};
-use mpz_common::executor::test_st_executor;
+use mpz_common::executor::{test_st_executor, STExecutor};
 use mpz_garble::protocol::deap::mock::{MockFollower, MockLeader};
 use mpz_ot::ideal::ot::ideal_ot;
+use serio::channel::MemoryDuplex;
 use tlsn_stream_cipher::{MpcStreamCipher, StreamCipherConfig};
 use tlsn_universal_hash::ghash::ideal_ghash;
-use utils_aio::duplex::MemoryDuplex;
 
 use super::*;
 
@@ -23,7 +23,10 @@ pub async fn create_mock_aes_gcm_pair(
     (leader, follower): (MockLeader, MockFollower),
     leader_config: AesGcmConfig,
     follower_config: AesGcmConfig,
-) -> (MpcAesGcm, MpcAesGcm) {
+) -> (
+    MpcAesGcm<STExecutor<MemoryDuplex>>,
+    MpcAesGcm<STExecutor<MemoryDuplex>>,
+) {
     let block_cipher_id = format!("{}/block_cipher", id);
     let (ctx_leader, ctx_follower) = test_st_executor(128);
 
@@ -69,14 +72,13 @@ pub async fn create_mock_aes_gcm_pair(
         follower,
     );
 
-    let (ctx_a, ctx_b) = test_st_executor(8);
+    let (ctx_a, ctx_b) = test_st_executor(128);
     let (leader_ghash, follower_ghash) = ideal_ghash(ctx_a, ctx_b);
 
-    let (leader_channel, follower_channel) = MemoryDuplex::new();
-
+    let (ctx_a, ctx_b) = test_st_executor(128);
     let leader = MpcAesGcm::new(
         leader_config,
-        Box::new(leader_channel),
+        ctx_a,
         Box::new(leader_block_cipher),
         Box::new(leader_stream_cipher),
         Box::new(leader_ghash),
@@ -84,7 +86,7 @@ pub async fn create_mock_aes_gcm_pair(
 
     let follower = MpcAesGcm::new(
         follower_config,
-        Box::new(follower_channel),
+        ctx_b,
         Box::new(follower_block_cipher),
         Box::new(follower_stream_cipher),
         Box::new(follower_ghash),

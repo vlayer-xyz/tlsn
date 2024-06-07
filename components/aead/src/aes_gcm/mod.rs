@@ -9,15 +9,17 @@ pub use config::{AesGcmConfig, AesGcmConfigBuilder, AesGcmConfigBuilderError, Ro
 
 use crate::{
     msg::{AeadMessage, TagShare},
-    Aead, AeadChannel, AeadError,
+    Aead, AeadError,
 };
 
 use async_trait::async_trait;
-use futures::{SinkExt, StreamExt, TryFutureExt};
 
 use block_cipher::{Aes128, BlockCipher};
+use futures::TryFutureExt;
+use mpz_common::Context;
 use mpz_core::commit::HashCommit;
 use mpz_garble::value::ValueRef;
+use serio::{SinkExt, StreamExt};
 use tlsn_stream_cipher::{Aes128Ctr, StreamCipher};
 use tlsn_universal_hash::UniversalHash;
 use utils_aio::expect_msg_or_err;
@@ -26,19 +28,19 @@ pub(crate) use tag::AesGcmTagShare;
 use tag::{build_ghash_data, AES_GCM_TAG_LEN};
 
 /// An implementation of 2PC AES-GCM.
-pub struct MpcAesGcm {
+pub struct MpcAesGcm<Ctx> {
     config: AesGcmConfig,
-    channel: AeadChannel,
+    context: Ctx,
     aes_block: Box<dyn BlockCipher<Aes128>>,
     aes_ctr: Box<dyn StreamCipher<Aes128Ctr>>,
     ghash: Box<dyn UniversalHash>,
 }
 
-impl std::fmt::Debug for MpcAesGcm {
+impl<Ctx> std::fmt::Debug for MpcAesGcm<Ctx> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MpcAesGcm")
             .field("config", &self.config)
-            .field("channel", &"AeadChannel {{ ... }}")
+            .field("context", &"Context {{ ... }}")
             .field("aes_block", &"BlockCipher {{ ... }}")
             .field("aes_ctr", &"StreamCipher {{ ... }}")
             .field("ghash", &"UniversalHash {{ ... }}")
@@ -46,22 +48,22 @@ impl std::fmt::Debug for MpcAesGcm {
     }
 }
 
-impl MpcAesGcm {
+impl<Ctx: Context> MpcAesGcm<Ctx> {
     /// Creates a new instance of [`MpcAesGcm`].
     #[cfg_attr(
         feature = "tracing",
-        tracing::instrument(level = "info", skip(channel, aes_block, aes_ctr, ghash), ret)
+        tracing::instrument(level = "info", skip(context, aes_block, aes_ctr, ghash), ret)
     )]
     pub fn new(
         config: AesGcmConfig,
-        channel: AeadChannel,
+        context: Ctx,
         aes_block: Box<dyn BlockCipher<Aes128>>,
         aes_ctr: Box<dyn StreamCipher<Aes128Ctr>>,
         ghash: Box<dyn UniversalHash>,
     ) -> Self {
         Self {
             config,
-            channel,
+            context,
             aes_block,
             aes_ctr,
             ghash,
@@ -112,23 +114,23 @@ impl MpcAesGcm {
             .compute_tag_share(explicit_nonce, aad, ciphertext.clone())
             .await?;
 
+        let channel = self.context.io_mut();
         let tag = match self.config.role() {
             Role::Leader => {
                 // Send commitment of tag share to follower.
                 let (tag_share_decommitment, tag_share_commitment) =
                     TagShare::from(tag_share).hash_commit();
 
-                self.channel
+                channel
                     .send(AeadMessage::TagShareCommitment(tag_share_commitment))
                     .await?;
 
-                // Expect tag share from follower.
-                let msg = expect_msg_or_err!(self.channel, AeadMessage::TagShare)?;
+                let msg = expect_msg_or_err!(channel, AeadMessage::TagShare)?;
 
                 let other_tag_share = AesGcmTagShare::from_unchecked(&msg.share)?;
 
                 // Send decommitment (tag share) to follower.
-                self.channel
+                channel
                     .send(AeadMessage::TagShareDecommitment(tag_share_decommitment))
                     .await?;
 
@@ -136,16 +138,15 @@ impl MpcAesGcm {
             }
             Role::Follower => {
                 // Wait for commitment from leader.
-                let commitment = expect_msg_or_err!(self.channel, AeadMessage::TagShareCommitment)?;
+                let commitment = expect_msg_or_err!(channel, AeadMessage::TagShareCommitment)?;
 
                 // Send tag share to leader.
-                self.channel
+                channel
                     .send(AeadMessage::TagShare(tag_share.into()))
                     .await?;
 
                 // Expect decommitment (tag share) from leader.
-                let decommitment =
-                    expect_msg_or_err!(self.channel, AeadMessage::TagShareDecommitment)?;
+                let decommitment = expect_msg_or_err!(channel, AeadMessage::TagShareDecommitment)?;
 
                 // Verify decommitment.
                 decommitment.verify(&commitment).map_err(|_| {
@@ -187,7 +188,7 @@ impl MpcAesGcm {
 }
 
 #[async_trait]
-impl Aead for MpcAesGcm {
+impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
     #[cfg_attr(feature = "tracing", tracing::instrument(level = "info", err))]
     async fn set_key(&mut self, key: ValueRef, iv: ValueRef) -> Result<(), AeadError> {
         self.aes_block.set_key(key.clone());
@@ -444,7 +445,9 @@ mod tests {
         aead::{AeadInPlace, KeyInit},
         Aes128Gcm, Nonce,
     };
+    use mpz_common::executor::STExecutor;
     use mpz_garble::{protocol::deap::mock::create_mock_deap_vm, Memory};
+    use serio::channel::MemoryDuplex;
 
     fn reference_impl(
         key: &[u8],
@@ -465,7 +468,13 @@ mod tests {
         ciphertext
     }
 
-    async fn setup_pair(key: Vec<u8>, iv: Vec<u8>) -> (MpcAesGcm, MpcAesGcm) {
+    async fn setup_pair(
+        key: Vec<u8>,
+        iv: Vec<u8>,
+    ) -> (
+        MpcAesGcm<STExecutor<MemoryDuplex>>,
+        MpcAesGcm<STExecutor<MemoryDuplex>>,
+    ) {
         let (leader_vm, follower_vm) = create_mock_deap_vm();
 
         let leader_key = leader_vm

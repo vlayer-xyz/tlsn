@@ -5,27 +5,29 @@ use aead::{
 use block_cipher::{Aes128, BlockCipherConfigBuilder, MpcBlockCipher};
 use futures::StreamExt;
 use hmac_sha256::{MpcPrf, Prf, PrfConfig, SessionKeys};
-use key_exchange::{KeyExchange, KeyExchangeConfig, Role as KeyExchangeRole};
-use mpz_common::executor::{test_mt_executor, STExecutor};
+use key_exchange::{KeyExchange, KeyExchangeConfig, MpcKeyExchange, Role as KeyExchangeRole};
+use mpz_common::{
+    executor::{test_mt_executor, STExecutor},
+    try_join,
+};
 use mpz_core::{prg::Prg, Block};
 use mpz_garble::{config::Role as GarbleRole, protocol::deap::mock::create_mock_deap_vm};
 use mpz_garble::{config::Role, protocol::deap::DEAPThread};
+use mpz_ole::rot::{OLEReceiver, OLESender};
+use mpz_ole::{OLEReceiver as OLEReceive, OLESender as OLESend};
 use mpz_ot::{
     chou_orlandi::{
         Receiver as BaseReceiver, ReceiverConfig as BaseReceiverConfig, Sender as BaseSender,
         SenderConfig as BaseSenderConfig,
     },
-    kos::{Receiver, ReceiverConfig, Sender, SenderConfig},
+    kos::{Receiver, ReceiverConfig, Sender, SenderConfig, SharedReceiver, SharedSender},
     OTSetup,
 };
-use p256::{NonZeroScalar, PublicKey, SecretKey};
+use mpz_share_conversion::{ShareConversionReceiver, ShareConversionSender};
+use p256::{elliptic_curve::consts::P256, NonZeroScalar, PublicKey, SecretKey};
 use rand::SeedableRng;
-use rand_chacha::ChaCha20Rng;
 use tlsn_stream_cipher::{Aes128Ctr, MpcStreamCipher, StreamCipherConfig};
 use tlsn_universal_hash::ghash::{Ghash, GhashConfig};
-use tokio_util::compat::TokioAsyncReadCompatExt;
-use uid_mux::{yamux, UidYamux};
-use utils_aio::{codec::BincodeMux, mux::MuxChannel};
 
 const OT_SETUP_COUNT: usize = 50_000;
 
@@ -43,18 +45,36 @@ async fn test_components() {
 
     let (exec_a, exec_b) = test_mt_executor(128);
 
+    let ctx_a1 = exec_a.new_thread().await.unwrap();
+    let ctx_a2 = exec_a.new_thread().await.unwrap();
+
+    let ctx_b1 = exec_b.new_thread().await.unwrap();
+    let ctx_b2 = exec_b.new_thread().await.unwrap();
+
     let leader_ot_sender_config = SenderConfig::default();
     let follower_ot_recvr_config = ReceiverConfig::default();
 
     let follower_ot_sender_config = SenderConfig::builder().sender_commit().build().unwrap();
     let leader_ot_recvr_config = ReceiverConfig::builder().sender_commit().build().unwrap();
 
-    let mut leader_ot_sender = Sender::new(
+    let leader_ot_sender = Sender::new(
         leader_ot_sender_config,
         BaseReceiver::new(BaseReceiverConfig::default()),
     );
+    let follower_ot_recvr = Receiver::new(
+        follower_ot_recvr_config,
+        BaseSender::new(BaseSenderConfig::default()),
+    );
 
-    let mut leader_ot_recvr = Receiver::new(
+    futures::try_join!(
+        leader_ot_sender.setup(&mut ctx_a1),
+        follower_ot_recvr.setup(&mut ctx_b2)
+    )
+    .unwrap();
+    let mut leader_ot_sender = SharedSender::new(leader_ot_sender);
+    let mut follower_ot_recvr = SharedReceiver::new(follower_ot_recvr);
+
+    let leader_ot_recvr = Receiver::new(
         leader_ot_recvr_config,
         BaseSender::new(
             BaseSenderConfig::builder()
@@ -64,7 +84,7 @@ async fn test_components() {
         ),
     );
 
-    let mut follower_ot_sender = Sender::new(
+    let follower_ot_sender = Sender::new(
         leader_ot_sender_config,
         BaseReceiver::new(
             BaseReceiverConfig::builder()
@@ -74,22 +94,13 @@ async fn test_components() {
         ),
     );
 
-    let mut follower_ot_recvr = Receiver::new(
-        follower_ot_recvr_config,
-        BaseSender::new(BaseSenderConfig::default()),
-    );
-
-    let ctx_a1 = exec_a.new_thread().await.unwrap();
-    let ctx_a2 = exec_a.new_thread().await.unwrap();
-
-    let ctx_b1 = exec_b.new_thread().await.unwrap();
-    let ctx_b2 = exec_b.new_thread().await.unwrap();
-
-    leader_ot_sender.setup(&mut ctx_a1).await.unwrap();
-    leader_ot_recvr.setup(&mut ctx_a2).await.unwrap();
-
-    follower_ot_sender.setup(&mut ctx_b1).await.unwrap();
-    follower_ot_recvr.setup(&mut ctx_b2).await.unwrap();
+    futures::try_join!(
+        leader_ot_recvr.setup(&mut ctx_a2),
+        follower_ot_sender.setup(&mut ctx_b1)
+    )
+    .unwrap();
+    let mut leader_ot_recvr = SharedReceiver::new(leader_ot_recvr);
+    let mut follower_ot_sender = SharedSender::new(follower_ot_sender);
 
     let ctx_a = exec_a.new_thread().await.unwrap();
     let ctx_b = exec_b.new_thread().await.unwrap();
@@ -98,95 +109,100 @@ async fn test_components() {
         Role::Leader,
         [0u8; 32],
         ctx_a,
-        leader_ot_sender,
-        leader_ot_recvr,
+        leader_ot_sender.clone(),
+        leader_ot_recvr.clone(),
     );
 
     let mut deap_follower = DEAPThread::new(
         Role::Follower,
         [1u8; 32],
         ctx_b,
-        follower_ot_sender,
-        follower_ot_recvr,
-    );
-
-    let leader_p256_sender = ff::ConverterSender::<P256, _>::new(
-        ff::SenderConfig::builder().id("p256/0").build().unwrap(),
-        leader_ot_sender.clone(),
-        leader_mux.get_channel("p256/0").await.unwrap(),
-    );
-
-    let leader_p256_receiver = ff::ConverterReceiver::<P256, _>::new(
-        ff::ReceiverConfig::builder().id("p256/1").build().unwrap(),
+        follower_ot_sender.clone(),
         follower_ot_recvr.clone(),
-        leader_mux.get_channel("p256/1").await.unwrap(),
     );
 
-    let follower_p256_sender = ff::ConverterSender::<P256, _>::new(
-        ff::SenderConfig::builder().id("p256/1").build().unwrap(),
-        leader_ot_sender.clone(),
-        follower_mux.get_channel("p256/1").await.unwrap(),
-    );
+    let ctx_a1 = exec_a.new_thread().await.unwrap();
+    let ctx_a2 = exec_a.new_thread().await.unwrap();
 
-    let follower_p256_receiver = ff::ConverterReceiver::<P256, _>::new(
-        ff::ReceiverConfig::builder().id("p256/0").build().unwrap(),
-        follower_ot_recvr.clone(),
-        follower_mux.get_channel("p256/0").await.unwrap(),
-    );
+    let ctx_b1 = exec_b.new_thread().await.unwrap();
+    let ctx_b2 = exec_b.new_thread().await.unwrap();
 
-    let leader_pa_sender = MpcPointAddition::new(PointAdditionRole::Leader, leader_p256_sender);
-    let leader_pa_receiver = MpcPointAddition::new(PointAdditionRole::Leader, leader_p256_receiver);
+    let leader_ole_sender = OLESender::new(leader_ot_sender.clone());
+    let leader_ole_receiver = OLEReceiver::new(leader_ot_recvr.clone());
 
-    let follower_pa_sender =
-        MpcPointAddition::new(PointAdditionRole::Follower, follower_p256_sender);
+    let leader_p256_sender = ShareConversionSender::<_, P256>::new(leader_ole_sender.clone());
+    let leader_p256_receiver = ShareConversionSender::<_, P256>::new(leader_ole_receiver.clone());
 
-    let follower_pa_receiver =
-        MpcPointAddition::new(PointAdditionRole::Follower, follower_p256_receiver);
+    let follower_ole_sender = OLESender::new(follower_ot_sender.clone());
+    let follower_ole_receiver = OLEReceiver::new(follower_ot_recvr.clone());
 
-    let mut leader_ke = key_exchange::KeyExchangeCore::new(
-        leader_mux.get_channel("ke").await.unwrap(),
-        leader_pa_sender,
-        leader_pa_receiver,
-        leader_vm.new_thread("ke").await.unwrap(),
+    let follower_p256_sender = ShareConversionSender::<_, P256>::new(follower_ole_sender.clone());
+    let follower_p256_receiver =
+        ShareConversionSender::<_, P256>::new(follower_ole_receiver.clone());
+
+    let mut leader_ke = MpcKeyExchange::new(
         KeyExchangeConfig::builder()
-            .id("ke")
             .role(KeyExchangeRole::Leader)
             .build()
             .unwrap(),
-    );
+        ctx_a1,
+        leader_p256_sender,
+        leader_p256_receiver,
+        deap_leader.new_thread(ctx_a1, leader_ot_sender.clone(), leader_ot_recvr.clone()),
+    )
+    .build()
+    .unwrap();
 
-    let mut follower_ke = key_exchange::KeyExchangeCore::new(
-        follower_mux.get_channel("ke").await.unwrap(),
-        follower_pa_sender,
-        follower_pa_receiver,
-        follower_vm.new_thread("ke").await.unwrap(),
+    let mut follower_ke = MpcKeyExchange::new(
         KeyExchangeConfig::builder()
-            .id("ke")
             .role(KeyExchangeRole::Follower)
             .build()
             .unwrap(),
-    );
+        ctx_b1,
+        follower_p256_sender,
+        follower_p256_receiver,
+        deap_follower.new_thread(
+            ctx_b2,
+            follower_ot_sender.clone(),
+            follower_ot_recvr.clone(),
+        ),
+    )
+    .build()
+    .unwrap();
 
     let (leader_pms, follower_pms) =
         futures::try_join!(leader_ke.setup(), follower_ke.setup()).unwrap();
+
+    let ctx_a1 = exec_a.new_thread().await.unwrap();
+    let ctx_a2 = exec_a.new_thread().await.unwrap();
+
+    let ctx_b1 = exec_b.new_thread().await.unwrap();
+    let ctx_b2 = exec_b.new_thread().await.unwrap();
 
     let mut leader_prf = MpcPrf::new(
         PrfConfig::builder()
             .role(hmac_sha256::Role::Leader)
             .build()
             .unwrap(),
-        leader_vm.new_thread("prf/0").await.unwrap(),
-        leader_vm.new_thread("prf/1").await.unwrap(),
+        deap_leader.new_thread(ctx_a1, leader_ot_sender.clone(), leader_ot_recvr.clone()),
+        deap_leader.new_thread(ctx_a2, leader_ot_sender.clone(), leader_ot_recvr.clone()),
     );
     let mut follower_prf = MpcPrf::new(
         PrfConfig::builder()
             .role(hmac_sha256::Role::Follower)
             .build()
             .unwrap(),
-        follower_vm.new_thread("prf/0").await.unwrap(),
-        follower_vm.new_thread("prf/1").await.unwrap(),
+        deap_follower.new_thread(
+            ctx_b1,
+            follower_ot_sender.clone(),
+            follower_ot_recvr.clone(),
+        ),
+        deap_follower.new_thread(
+            ctx_b2,
+            follower_ot_sender.clone(),
+            follower_ot_recvr.clone(),
+        ),
     );
-
     futures::try_join!(
         leader_prf.setup(leader_pms.into_value()),
         follower_prf.setup(follower_pms.into_value())

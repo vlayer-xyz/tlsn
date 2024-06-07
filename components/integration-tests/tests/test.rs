@@ -3,23 +3,22 @@ use aead::{
     Aead,
 };
 use block_cipher::{Aes128, BlockCipherConfigBuilder, MpcBlockCipher};
-use ff::Gf2_128;
 use futures::StreamExt;
 use hmac_sha256::{MpcPrf, Prf, PrfConfig, SessionKeys};
 use key_exchange::{KeyExchange, KeyExchangeConfig, Role as KeyExchangeRole};
-use mpz_garble::{config::Role as GarbleRole, protocol::deap::DEAPVm, Vm};
+use mpz_common::executor::{test_mt_executor, STExecutor};
+use mpz_core::{prg::Prg, Block};
+use mpz_garble::{config::Role as GarbleRole, protocol::deap::mock::create_mock_deap_vm};
+use mpz_garble::{config::Role, protocol::deap::DEAPThread};
 use mpz_ot::{
-    actor::kos::{ReceiverActor, SenderActor},
     chou_orlandi::{
         Receiver as BaseReceiver, ReceiverConfig as BaseReceiverConfig, Sender as BaseSender,
         SenderConfig as BaseSenderConfig,
     },
     kos::{Receiver, ReceiverConfig, Sender, SenderConfig},
+    OTSetup,
 };
-use mpz_share_conversion as ff;
-use mpz_share_conversion::{ShareConversionReveal, ShareConversionVerify};
 use p256::{NonZeroScalar, PublicKey, SecretKey};
-use point_addition::{MpcPointAddition, Role as PointAdditionRole, P256};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use tlsn_stream_cipher::{Aes128Ctr, MpcStreamCipher, StreamCipherConfig};
@@ -40,29 +39,9 @@ const OT_SETUP_COUNT: usize = 50_000;
 ///   - aead cipher (stream cipher + ghash)
 #[tokio::test]
 async fn test_components() {
-    let mut rng = ChaCha20Rng::seed_from_u64(0);
+    let mut rng = Prg::from_seed(Block::ZERO);
 
-    let (leader_socket, follower_socket) = tokio::io::duplex(1 << 25);
-
-    let mut leader_mux = UidYamux::new(
-        yamux::Config::default(),
-        leader_socket.compat(),
-        yamux::Mode::Client,
-    );
-    let mut follower_mux = UidYamux::new(
-        yamux::Config::default(),
-        follower_socket.compat(),
-        yamux::Mode::Server,
-    );
-
-    let leader_mux_control = leader_mux.control();
-    let follower_mux_control = follower_mux.control();
-
-    tokio::spawn(async move { leader_mux.run().await.unwrap() });
-    tokio::spawn(async move { follower_mux.run().await.unwrap() });
-
-    let mut leader_mux = BincodeMux::new(leader_mux_control);
-    let mut follower_mux = BincodeMux::new(follower_mux_control);
+    let (exec_a, exec_b) = test_mt_executor(128);
 
     let leader_ot_sender_config = SenderConfig::default();
     let follower_ot_recvr_config = ReceiverConfig::default();
@@ -70,112 +49,65 @@ async fn test_components() {
     let follower_ot_sender_config = SenderConfig::builder().sender_commit().build().unwrap();
     let leader_ot_recvr_config = ReceiverConfig::builder().sender_commit().build().unwrap();
 
-    let (leader_ot_sender_sink, leader_ot_sender_stream) =
-        leader_mux.get_channel("ot/0").await.unwrap().split();
-
-    let (follower_ot_recvr_sink, follower_ot_recvr_stream) =
-        follower_mux.get_channel("ot/0").await.unwrap().split();
-
-    let (leader_ot_receiver_sink, leader_ot_receiver_stream) =
-        leader_mux.get_channel("ot/1").await.unwrap().split();
-
-    let (follower_ot_sender_sink, follower_ot_sender_stream) =
-        follower_mux.get_channel("ot/1").await.unwrap().split();
-
-    let mut leader_ot_sender_actor = SenderActor::new(
-        Sender::new(
-            leader_ot_sender_config,
-            BaseReceiver::new(BaseReceiverConfig::default()),
-        ),
-        leader_ot_sender_sink,
-        leader_ot_sender_stream,
+    let mut leader_ot_sender = Sender::new(
+        leader_ot_sender_config,
+        BaseReceiver::new(BaseReceiverConfig::default()),
     );
 
-    let mut follower_ot_recvr_actor = ReceiverActor::new(
-        Receiver::new(
-            follower_ot_recvr_config,
-            BaseSender::new(BaseSenderConfig::default()),
+    let mut leader_ot_recvr = Receiver::new(
+        leader_ot_recvr_config,
+        BaseSender::new(
+            BaseSenderConfig::builder()
+                .receiver_commit()
+                .build()
+                .unwrap(),
         ),
-        follower_ot_recvr_sink,
-        follower_ot_recvr_stream,
     );
 
-    let mut leader_ot_recvr_actor = ReceiverActor::new(
-        Receiver::new(
-            leader_ot_recvr_config,
-            BaseSender::new(
-                BaseSenderConfig::builder()
-                    .receiver_commit()
-                    .build()
-                    .unwrap(),
-            ),
+    let mut follower_ot_sender = Sender::new(
+        leader_ot_sender_config,
+        BaseReceiver::new(
+            BaseReceiverConfig::builder()
+                .receiver_commit()
+                .build()
+                .unwrap(),
         ),
-        leader_ot_receiver_sink,
-        leader_ot_receiver_stream,
     );
 
-    let mut follower_ot_sender_actor = SenderActor::new(
-        Sender::new(
-            follower_ot_sender_config,
-            BaseReceiver::new(
-                BaseReceiverConfig::builder()
-                    .receiver_commit()
-                    .build()
-                    .unwrap(),
-            ),
-        ),
-        follower_ot_sender_sink,
-        follower_ot_sender_stream,
+    let mut follower_ot_recvr = Receiver::new(
+        follower_ot_recvr_config,
+        BaseSender::new(BaseSenderConfig::default()),
     );
 
-    let leader_ot_sender = leader_ot_sender_actor.sender();
-    let follower_ot_recvr = follower_ot_recvr_actor.receiver();
+    let ctx_a1 = exec_a.new_thread().await.unwrap();
+    let ctx_a2 = exec_a.new_thread().await.unwrap();
 
-    let leader_ot_recvr = leader_ot_recvr_actor.receiver();
-    let follower_ot_sender = follower_ot_sender_actor.sender();
+    let ctx_b1 = exec_b.new_thread().await.unwrap();
+    let ctx_b2 = exec_b.new_thread().await.unwrap();
 
-    tokio::spawn(async move {
-        leader_ot_sender_actor.setup(OT_SETUP_COUNT).await.unwrap();
-        leader_ot_sender_actor.run().await.unwrap();
-    });
+    leader_ot_sender.setup(&mut ctx_a1).await.unwrap();
+    leader_ot_recvr.setup(&mut ctx_a2).await.unwrap();
 
-    tokio::spawn(async move {
-        follower_ot_recvr_actor.setup(OT_SETUP_COUNT).await.unwrap();
-        follower_ot_recvr_actor.run().await.unwrap();
-    });
+    follower_ot_sender.setup(&mut ctx_b1).await.unwrap();
+    follower_ot_recvr.setup(&mut ctx_b2).await.unwrap();
 
-    tokio::spawn(async move {
-        leader_ot_recvr_actor.setup(OT_SETUP_COUNT).await.unwrap();
-        leader_ot_recvr_actor.run().await.unwrap();
-    });
+    let ctx_a = exec_a.new_thread().await.unwrap();
+    let ctx_b = exec_b.new_thread().await.unwrap();
 
-    tokio::spawn(async move {
-        follower_ot_sender_actor
-            .setup(OT_SETUP_COUNT)
-            .await
-            .unwrap();
-        follower_ot_sender_actor.run().await.unwrap();
-        follower_ot_sender_actor.reveal().await.unwrap();
-    });
-
-    let mut leader_vm = DEAPVm::new(
-        "vm",
-        GarbleRole::Leader,
+    let mut deap_leader = DEAPThread::new(
+        Role::Leader,
         [0u8; 32],
-        leader_mux.get_channel("vm").await.unwrap(),
-        Box::new(leader_mux.clone()),
-        leader_ot_sender.clone(),
-        leader_ot_recvr.clone(),
+        ctx_a,
+        leader_ot_sender,
+        leader_ot_recvr,
     );
 
-    let mut follower_vm = DEAPVm::new(
-        "vm",
-        GarbleRole::Follower,
+    let mut deap_follower = DEAPThread::new(
+        Role::Follower,
         [1u8; 32],
-        follower_mux.get_channel("vm").await.unwrap(),
-        Box::new(follower_mux.clone()),
-        follower_ot_sender.clone(),
-        follower_ot_recvr.clone(),
+        ctx_b,
+        follower_ot_sender,
+        follower_ot_recvr,
     );
 
     let leader_p256_sender = ff::ConverterSender::<P256, _>::new(

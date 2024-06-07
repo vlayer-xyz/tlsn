@@ -9,17 +9,20 @@ version = "0.1.0-alpha.5"
 edition = "2021"
 
 [features]
-default = ["ghash", "mock"]
+default = ["ghash", "ideal"]
 tracing = ["dep:tracing"]
 ghash = []
-mock = []
+ideal = ["dep:ghash_rc"]
 
 [dependencies]
 # tlsn
-mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "9f7403b" }
-mpz-fields = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "9f7403b" }
-mpz-share-conversion-core = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "9f7403b" }
-mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "9f7403b" }
+mpz-core = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
+mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a", features = ["ideal"] }
+mpz-fields = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
+mpz-share-conversion-core = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
+mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a" }
+
+ghash_rc = { package = "ghash", version = "0.5", optional = true }
 
 # async
 async-trait = "0.1"
@@ -35,6 +38,13 @@ tracing = { version = "0.1", optional = true }
 derive_builder = "0.12"
 
 [dev-dependencies]
+mpz-common = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a", features = [
+    "test-utils",
+] }
+mpz-share-conversion = { git = "https://github.com/privacy-scaling-explorations/mpz", rev = "e34104a", features = [
+    "ideal",
+] }
+
 ghash_rc = { package = "ghash", version = "0.5" }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 criterion = "0.5"

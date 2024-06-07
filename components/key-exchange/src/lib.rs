@@ -15,24 +15,21 @@
 
 mod circuit;
 mod config;
+pub(crate) mod error;
 mod exchange;
-#[cfg(feature = "mock")]
-pub mod mock;
-pub mod msg;
+// #[cfg(feature = "mock")]
+// pub mod mock;
+pub(crate) mod point_addition;
 
 pub use config::{
     KeyExchangeConfig, KeyExchangeConfigBuilder, KeyExchangeConfigBuilderError, Role,
 };
-pub use exchange::KeyExchangeCore;
-pub use msg::KeyExchangeMessage;
-
-/// A channel for exchanging key exchange messages.
-pub type KeyExchangeChannel = Box<dyn Duplex<KeyExchangeMessage>>;
+pub use error::KeyExchangeError;
+pub use exchange::MpcKeyExchange;
 
 use async_trait::async_trait;
 use mpz_garble::value::ValueRef;
 use p256::{PublicKey, SecretKey};
-use utils_aio::duplex::Duplex;
 
 /// Pre-master secret.
 #[derive(Debug, Clone)]
@@ -48,36 +45,6 @@ impl Pms {
     pub fn into_value(self) -> ValueRef {
         self.0
     }
-}
-
-/// An error that can occur during the key exchange protocol.
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
-pub enum KeyExchangeError {
-    #[error(transparent)]
-    IOError(#[from] std::io::Error),
-    #[error(transparent)]
-    MemoryError(#[from] mpz_garble::MemoryError),
-    #[error(transparent)]
-    LoadError(#[from] mpz_garble::LoadError),
-    #[error(transparent)]
-    ExecutionError(#[from] mpz_garble::ExecutionError),
-    #[error(transparent)]
-    DecodeError(#[from] mpz_garble::DecodeError),
-    #[error(transparent)]
-    PointAdditionError(#[from] point_addition::PointAdditionError),
-    #[error(transparent)]
-    PublicKey(#[from] p256::elliptic_curve::Error),
-    #[error(transparent)]
-    KeyParseError(#[from] msg::KeyParseError),
-    #[error("Server Key not set")]
-    NoServerKey,
-    #[error("Private key not set")]
-    NoPrivateKey,
-    #[error("invalid state: {0}")]
-    InvalidState(String),
-    #[error("PMS equality check failed")]
-    CheckFailed,
 }
 
 /// A trait for the 3-party key exchange protocol.

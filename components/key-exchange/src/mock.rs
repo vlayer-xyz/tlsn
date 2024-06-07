@@ -1,7 +1,7 @@
 //! This module provides mock types for key exchange leader and follower and a function to create
 //! such a pair.
 
-use crate::{KeyExchangeConfig, KeyExchangeCore, KeyExchangeMessage, Role};
+use crate::{KeyExchangeConfig, KeyExchangeMessage, MpcKeyExchange, Role};
 
 use mpz_garble::{Decode, Execute, Memory};
 use point_addition::mock::{
@@ -10,8 +10,7 @@ use point_addition::mock::{
 use utils_aio::duplex::MemoryDuplex;
 
 /// A mock key exchange instance.
-pub type MockKeyExchange<E> =
-    KeyExchangeCore<MockPointAdditionSender, MockPointAdditionReceiver, E>;
+pub type MockKeyExchange<E> = MpcKeyExchange<MockPointAdditionSender, MockPointAdditionReceiver, E>;
 
 /// Creates a mock pair of key exchange leader and follower.
 pub fn create_mock_key_exchange_pair<E: Memory + Execute + Decode + Send>(
@@ -36,7 +35,7 @@ pub fn create_mock_key_exchange_pair<E: Memory + Execute + Decode + Send>(
         .build()
         .unwrap();
 
-    let leader = KeyExchangeCore::new(
+    let leader = MpcKeyExchange::new(
         Box::new(leader_channel),
         leader_pa_sender,
         leader_pa_recvr,
@@ -44,7 +43,7 @@ pub fn create_mock_key_exchange_pair<E: Memory + Execute + Decode + Send>(
         key_exchange_config_leader,
     );
 
-    let follower = KeyExchangeCore::new(
+    let follower = MpcKeyExchange::new(
         Box::new(follower_channel),
         follower_pa_sender,
         follower_pa_recvr,

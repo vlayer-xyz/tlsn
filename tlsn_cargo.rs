@@ -1,14 +1,14 @@
 #!/usr/bin/env cargo +nightly -Zscript
-```cargo
+---
 [package]
 name = "TLSN_cargo"
 version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.2", features = ["derive"] }
-strum = { version = "0.25", features = ["derive"] }
-```
+clap = { version = "4.5", features = ["derive"] }
+strum = { version = "0.26", features = ["derive"] }
+---
 
 use std::process::{Command, Stdio};
 

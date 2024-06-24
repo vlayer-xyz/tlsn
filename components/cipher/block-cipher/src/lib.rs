@@ -184,6 +184,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_block_cipher_j0_share() {
+        let leader_config = BlockCipherConfig::builder().id("test").build().unwrap();
+        let follower_config = BlockCipherConfig::builder().id("test").build().unwrap();
+
+        let key = [0u8; 16];
+        let iv = [1u8; 4];
+
+        let (leader_vm, follower_vm) = create_mock_deap_vm();
+
+        // Key and iv are public just for this test, typically they are private.
+        let leader_key = leader_vm.new_public_input::<[u8; 16]>("key").unwrap();
+        let leader_iv = leader_vm.new_public_input::<[u8; 4]>("iv").unwrap();
+
+        let follower_key = follower_vm.new_public_input::<[u8; 16]>("key").unwrap();
+        let follower_iv = follower_vm.new_public_input::<[u8; 4]>("iv").unwrap();
+
+        leader_vm.assign(&leader_key, key).unwrap();
+        leader_vm.assign(&leader_iv, iv).unwrap();
+
+        follower_vm.assign(&follower_key, key).unwrap();
+        follower_vm.assign(&follower_iv, iv).unwrap();
+
+        let mut leader = MpcBlockCipher::<Aes128, _>::new(leader_config, leader_vm);
+        leader.set_key(leader_key, leader_iv);
+
+        let mut follower = MpcBlockCipher::<Aes128, _>::new(follower_config, follower_vm);
+        follower.set_key(follower_key, follower_iv);
+
+        let explicit_nonce = vec![2_u8; 8];
+
+        let (leader_share, follower_share) = tokio::try_join!(
+            leader.share_j0(explicit_nonce.clone()),
+            follower.share_j0(explicit_nonce.clone())
+        )
+        .unwrap();
+
+        let msg: [u8; 16] = [iv.to_vec(), explicit_nonce, (1_u32).to_be_bytes().to_vec()]
+            .concat()
+            .try_into()
+            .unwrap();
+        let expected = aes128(key, msg);
+
+        let result: [u8; 16] = std::array::from_fn(|i| leader_share[i] ^ follower_share[i]);
+
+        assert_eq!(result, expected);
+    }
+
+    #[tokio::test]
     async fn test_block_cipher_preprocess() {
         let leader_config = BlockCipherConfig::builder().id("test").build().unwrap();
         let follower_config = BlockCipherConfig::builder().id("test").build().unwrap();

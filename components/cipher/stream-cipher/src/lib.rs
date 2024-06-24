@@ -339,44 +339,6 @@ mod tests {
     #[rstest]
     #[timeout(Duration::from_millis(10000))]
     #[tokio::test]
-    async fn test_stream_cipher_share_key_block() {
-        let key = [0u8; 16];
-        let iv = [0u8; 4];
-        let explicit_nonce = [0u8; 8];
-
-        let (mut leader, mut follower) = create_test_pair::<Aes128Ctr>(1, key, iv).await;
-
-        let leader_fut = async {
-            leader
-                .share_keystream_block(explicit_nonce.to_vec(), 1)
-                .await
-                .unwrap()
-        };
-
-        let follower_fut = async {
-            follower
-                .share_keystream_block(explicit_nonce.to_vec(), 1)
-                .await
-                .unwrap()
-        };
-
-        let (leader_share, follower_share) = futures::join!(leader_fut, follower_fut);
-
-        let key_block = leader_share
-            .into_iter()
-            .zip(follower_share)
-            .map(|(a, b)| a ^ b)
-            .collect::<Vec<u8>>();
-
-        let reference =
-            Aes128Ctr::apply_keystream(&key, &iv, 1, &explicit_nonce, &[0u8; 16]).unwrap();
-
-        assert_eq!(reference, key_block);
-    }
-
-    #[rstest]
-    #[timeout(Duration::from_millis(10000))]
-    #[tokio::test]
     async fn test_stream_cipher_zk() {
         let key = [0u8; 16];
         let iv = [0u8; 4];

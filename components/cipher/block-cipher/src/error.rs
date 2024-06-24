@@ -42,6 +42,19 @@ impl BlockCipherError {
             ),
         }
     }
+
+    pub(crate) fn invalid_explicit_nonce_length<C: BlockCipherCircuit>(len: usize) -> Self {
+        Self {
+            kind: ErrorKind::Msg,
+            source: Some(
+                format!(
+                    "explicit nonce length does not match expected: {} != {}",
+                    len, 8
+                )
+                .into(),
+            ),
+        }
+    }
 }
 
 #[derive(Debug)]

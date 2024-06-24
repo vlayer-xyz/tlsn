@@ -287,38 +287,48 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn share_keystream_block(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        ctr: usize,
-    ) -> Result<Vec<u8>, BlockCipherError> {
+    async fn share_j0(&mut self, explicit_nonce: Vec<u8>) -> Result<Vec<u8>, BlockCipherError> {
+        if explicit_nonce.len() != 8 {
+            return Err(BlockCipherError::invalid_explicit_nonce_length::<C>(
+                explicit_nonce.len(),
+            ));
+        }
+
         let EncodedKeyAndIv { key, iv } = self
             .state
             .key_and_iv
             .as_ref()
+            .cloned()
             .ok_or_else(|| BlockCipherError::key_not_set())?;
 
-        //        let key_block = self
-        //            .state
-        //            .keystream
-        //            .compute(
-        //                &mut self.thread,
-        //                ExecutionMode::Mpc,
-        //                key,
-        //                iv,
-        //                explicit_nonce,
-        //                ctr,
-        //                C::BLOCK_LEN,
-        //            )
-        //            .await?;
-        //
-        //        let share = self
-        //            .decode_shared(key_block)
-        //            .await?
-        //            .try_into()
-        //            .expect("key block is array");
-        //
-        //        Ok(share);
-        todo!()
+        let BlockVars { msg, ciphertext } =
+            if let Some(vars) = self.state.preprocessed_public.pop_front() {
+                vars
+            } else {
+                self.define_block(Visibility::Public)
+            };
+
+        self.executor.assign(
+            &msg,
+            [explicit_nonce, (1 as u32).to_be_bytes().to_vec()].concat(),
+        )?;
+
+        self.executor
+            .commit(&[key.clone(), iv.clone(), msg.clone()])
+            .await?;
+        self.executor
+            .execute(C::circuit(), &[key, iv, msg], &[ciphertext.clone()])
+            .await?;
+
+        let mut outputs = self.executor.decode_shared(&[ciphertext]).await?;
+
+        let share: C::BLOCK =
+            if let Ok(share) = outputs.pop().expect("share should be present").try_into() {
+                share
+            } else {
+                panic!("share should be a block")
+            };
+
+        Ok(share.into())
     }
 }

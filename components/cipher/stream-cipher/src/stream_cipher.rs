@@ -227,14 +227,6 @@ where
             .map(|mut output| output.pop().unwrap())
     }
 
-    async fn decode_shared(&mut self, value: ValueRef) -> Result<Value, StreamCipherError> {
-        self.thread
-            .decode_shared(&[value])
-            .await
-            .map_err(StreamCipherError::from)
-            .map(|mut output| output.pop().unwrap())
-    }
-
     async fn decode_private(&mut self, value: ValueRef) -> Result<Value, StreamCipherError> {
         self.thread
             .decode_private(&[value])

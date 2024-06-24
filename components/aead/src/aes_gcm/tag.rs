@@ -42,7 +42,7 @@ async fn compute_tag_share<C: BlockCipher<Aes128> + ?Sized, H: UniversalHash + ?
 ) -> Result<TagShare, AesGcmError> {
     let (j0, hash) = futures::try_join!(
         aes_block
-            .share_keystream_block(explicit_nonce, 1)
+            .share_j0(explicit_nonce)
             .map_err(AesGcmError::from),
         hasher
             .finalize(build_ghash_data(aad, ciphertext))

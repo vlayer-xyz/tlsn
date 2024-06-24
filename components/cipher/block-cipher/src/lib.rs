@@ -78,17 +78,12 @@ where
     /// * `plaintext` - The plaintext to encrypt.
     async fn encrypt_share(&mut self, plaintext: Vec<u8>) -> Result<Vec<u8>, BlockCipherError>;
 
-    /// Returns an additive share of the keystream block for the given explicit nonce and counter.
+    /// Returns an additive share of the j0 block for the given explicit nonce.
     ///
     /// # Arguments
     ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream block.
-    /// * `ctr` - The counter to use for the keystream block.
-    async fn share_keystream_block(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        ctr: usize,
-    ) -> Result<Vec<u8>, BlockCipherError>;
+    /// * `explicit_nonce` - The explicit nonce to use for the j0 block.
+    async fn share_j0(&mut self, explicit_nonce: Vec<u8>) -> Result<Vec<u8>, BlockCipherError>;
 }
 
 #[cfg(test)]

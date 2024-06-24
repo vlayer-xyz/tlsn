@@ -632,39 +632,4 @@ where
 
         Ok(())
     }
-
-    #[instrument(level = "debug", skip_all, err)]
-    async fn share_keystream_block(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        ctr: usize,
-    ) -> Result<Vec<u8>, StreamCipherError> {
-        let EncodedKeyAndIv { key, iv } = self
-            .state
-            .encoded_key_iv
-            .as_ref()
-            .ok_or_else(|| StreamCipherError::key_not_set())?;
-
-        let key_block = self
-            .state
-            .keystream
-            .compute(
-                &mut self.thread,
-                ExecutionMode::Mpc,
-                key,
-                iv,
-                explicit_nonce,
-                ctr,
-                C::BLOCK_LEN,
-            )
-            .await?;
-
-        let share = self
-            .decode_shared(key_block)
-            .await?
-            .try_into()
-            .expect("key block is array");
-
-        Ok(share)
-    }
 }

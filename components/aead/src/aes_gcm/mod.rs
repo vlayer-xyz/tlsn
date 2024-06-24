@@ -65,7 +65,7 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
 
     #[instrument(level = "info", skip_all, err)]
     async fn set_key(&mut self, key: ValueRef, iv: ValueRef) -> Result<(), AesGcmError> {
-        self.aes_block.set_key(key.clone());
+        self.aes_block.set_key(key.clone(), iv.clone());
         self.aes_ctr.set_key(key, iv);
 
         Ok(())
@@ -105,6 +105,7 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
             self.aes_block
                 .preprocess(block_cipher::Visibility::Public, 1)
                 .map_err(AesGcmError::from),
+            // TODO Add preprocess for aes_block for j0.
             self.aes_ctr.preprocess(len).map_err(AesGcmError::from),
             self.ghash.preprocess().map_err(AesGcmError::from),
         )?;
@@ -134,7 +135,7 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
 
         let tag = compute_tag(
             &mut self.ctx,
-            self.aes_ctr.as_mut(),
+            self.aes_block.as_mut(),
             self.ghash.as_mut(),
             explicit_nonce,
             ciphertext.clone(),
@@ -162,7 +163,7 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
 
         let tag = compute_tag(
             &mut self.ctx,
-            self.aes_ctr.as_mut(),
+            self.aes_block.as_mut(),
             self.ghash.as_mut(),
             explicit_nonce,
             ciphertext.clone(),
@@ -190,7 +191,7 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
 
         let tag = compute_tag(
             &mut self.ctx,
-            self.aes_ctr.as_mut(),
+            self.aes_block.as_mut(),
             self.ghash.as_mut(),
             explicit_nonce,
             ciphertext.clone(),
@@ -217,22 +218,21 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
             .map_err(|_| AesGcmError::payload("payload is not long enough to contain tag"))?;
         let ciphertext = payload;
 
-        verify_tag(
-            &mut self.ctx,
-            self.aes_ctr.as_mut(),
-            self.ghash.as_mut(),
-            *self.config.role(),
-            explicit_nonce.clone(),
-            ciphertext.clone(),
-            aad,
-            purported_tag,
-        )
-        .await?;
-
-        let plaintext = self
-            .aes_ctr
-            .decrypt_public(explicit_nonce, ciphertext)
-            .await?;
+        let (_, plaintext) = futures::try_join!(
+            verify_tag(
+                &mut self.ctx,
+                self.aes_block.as_mut(),
+                self.ghash.as_mut(),
+                *self.config.role(),
+                explicit_nonce.clone(),
+                ciphertext.clone(),
+                aad,
+                purported_tag,
+            ),
+            self.aes_ctr
+                .decrypt_public(explicit_nonce, ciphertext)
+                .map_err(AesGcmError::from)
+        )?;
 
         Ok(plaintext)
     }
@@ -250,22 +250,21 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
             .map_err(|_| AesGcmError::payload("payload is not long enough to contain tag"))?;
         let ciphertext = payload;
 
-        verify_tag(
-            &mut self.ctx,
-            self.aes_ctr.as_mut(),
-            self.ghash.as_mut(),
-            *self.config.role(),
-            explicit_nonce.clone(),
-            ciphertext.clone(),
-            aad,
-            purported_tag,
-        )
-        .await?;
-
-        let plaintext = self
-            .aes_ctr
-            .decrypt_private(explicit_nonce, ciphertext)
-            .await?;
+        let (_, plaintext) = futures::try_join!(
+            verify_tag(
+                &mut self.ctx,
+                self.aes_block.as_mut(),
+                self.ghash.as_mut(),
+                *self.config.role(),
+                explicit_nonce.clone(),
+                ciphertext.clone(),
+                aad,
+                purported_tag,
+            ),
+            self.aes_ctr
+                .decrypt_private(explicit_nonce, ciphertext)
+                .map_err(AesGcmError::from)
+        )?;
 
         Ok(plaintext)
     }
@@ -283,21 +282,21 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
             .map_err(|_| AesGcmError::payload("payload is not long enough to contain tag"))?;
         let ciphertext = payload;
 
-        verify_tag(
-            &mut self.ctx,
-            self.aes_ctr.as_mut(),
-            self.ghash.as_mut(),
-            *self.config.role(),
-            explicit_nonce.clone(),
-            ciphertext.clone(),
-            aad,
-            purported_tag,
-        )
-        .await?;
-
-        self.aes_ctr
-            .decrypt_blind(explicit_nonce, ciphertext)
-            .await?;
+        futures::try_join!(
+            verify_tag(
+                &mut self.ctx,
+                self.aes_block.as_mut(),
+                self.ghash.as_mut(),
+                *self.config.role(),
+                explicit_nonce.clone(),
+                ciphertext.clone(),
+                aad,
+                purported_tag,
+            ),
+            self.aes_ctr
+                .decrypt_blind(explicit_nonce, ciphertext)
+                .map_err(AesGcmError::from)
+        )?;
 
         Ok(())
     }
@@ -317,7 +316,7 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
 
         verify_tag(
             &mut self.ctx,
-            self.aes_ctr.as_mut(),
+            self.aes_block.as_mut(),
             self.ghash.as_mut(),
             *self.config.role(),
             explicit_nonce,
@@ -343,22 +342,21 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
             .map_err(|_| AesGcmError::payload("payload is not long enough to contain tag"))?;
         let ciphertext = payload;
 
-        verify_tag(
-            &mut self.ctx,
-            self.aes_ctr.as_mut(),
-            self.ghash.as_mut(),
-            *self.config.role(),
-            explicit_nonce.clone(),
-            ciphertext.clone(),
-            aad,
-            purported_tag,
-        )
-        .await?;
-
-        let plaintext = self
-            .aes_ctr
-            .prove_plaintext(explicit_nonce, ciphertext)
-            .await?;
+        let (_, plaintext) = futures::try_join!(
+            verify_tag(
+                &mut self.ctx,
+                self.aes_block.as_mut(),
+                self.ghash.as_mut(),
+                *self.config.role(),
+                explicit_nonce.clone(),
+                ciphertext.clone(),
+                aad,
+                purported_tag,
+            ),
+            self.aes_ctr
+                .prove_plaintext(explicit_nonce, ciphertext)
+                .map_err(AesGcmError::from)
+        )?;
 
         Ok(plaintext)
     }
@@ -388,21 +386,21 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
             .map_err(|_| AesGcmError::payload("payload is not long enough to contain tag"))?;
         let ciphertext = payload;
 
-        verify_tag(
-            &mut self.ctx,
-            self.aes_ctr.as_mut(),
-            self.ghash.as_mut(),
-            *self.config.role(),
-            explicit_nonce.clone(),
-            ciphertext.clone(),
-            aad,
-            purported_tag,
-        )
-        .await?;
-
-        self.aes_ctr
-            .verify_plaintext(explicit_nonce, ciphertext)
-            .await?;
+        futures::try_join!(
+            verify_tag(
+                &mut self.ctx,
+                self.aes_block.as_mut(),
+                self.ghash.as_mut(),
+                *self.config.role(),
+                explicit_nonce.clone(),
+                ciphertext.clone(),
+                aad,
+                purported_tag,
+            ),
+            self.aes_ctr
+                .verify_plaintext(explicit_nonce, ciphertext)
+                .map_err(AesGcmError::from)
+        )?;
 
         Ok(())
     }

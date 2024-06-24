@@ -1,3 +1,4 @@
+use block_cipher::{Aes128, BlockCipher};
 use futures::TryFutureExt;
 use mpz_common::Context;
 use mpz_core::{
@@ -7,7 +8,6 @@ use mpz_core::{
 use serde::{Deserialize, Serialize};
 use serio::{stream::IoStreamExt, SinkExt};
 use std::ops::Add;
-use tlsn_stream_cipher::{Aes128Ctr, StreamCipher};
 use tlsn_universal_hash::UniversalHash;
 use tracing::instrument;
 
@@ -33,15 +33,15 @@ impl Add for TagShare {
 }
 
 #[instrument(level = "trace", skip_all, err)]
-async fn compute_tag_share<C: StreamCipher<Aes128Ctr> + ?Sized, H: UniversalHash + ?Sized>(
-    aes_ctr: &mut C,
+async fn compute_tag_share<C: BlockCipher<Aes128> + ?Sized, H: UniversalHash + ?Sized>(
+    aes_block: &mut C,
     hasher: &mut H,
     explicit_nonce: Vec<u8>,
     ciphertext: Vec<u8>,
     aad: Vec<u8>,
 ) -> Result<TagShare, AesGcmError> {
     let (j0, hash) = futures::try_join!(
-        aes_ctr
+        aes_block
             .share_keystream_block(explicit_nonce, 1)
             .map_err(AesGcmError::from),
         hasher
@@ -64,7 +64,7 @@ async fn compute_tag_share<C: StreamCipher<Aes128Ctr> + ?Sized, H: UniversalHash
 #[instrument(level = "debug", skip_all, err)]
 pub(crate) async fn compute_tag<
     Ctx: Context,
-    C: StreamCipher<Aes128Ctr> + ?Sized,
+    C: BlockCipher<Aes128> + ?Sized,
     H: UniversalHash + ?Sized,
 >(
     ctx: &mut Ctx,
@@ -95,7 +95,7 @@ pub(crate) async fn compute_tag<
 #[instrument(level = "debug", skip_all, err)]
 pub(crate) async fn verify_tag<
     Ctx: Context,
-    C: StreamCipher<Aes128Ctr> + ?Sized,
+    C: BlockCipher<Aes128> + ?Sized,
     H: UniversalHash + ?Sized,
 >(
     ctx: &mut Ctx,

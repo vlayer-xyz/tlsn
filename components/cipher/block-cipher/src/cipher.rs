@@ -14,7 +14,13 @@ struct State {
     public_execution_id: NestedId,
     preprocessed_private: VecDeque<BlockVars>,
     preprocessed_public: VecDeque<BlockVars>,
-    key: Option<ValueRef>,
+    key_and_iv: Option<EncodedKeyAndIv>,
+}
+
+#[derive(Debug, Clone)]
+struct EncodedKeyAndIv {
+    key: ValueRef,
+    iv: ValueRef,
 }
 
 #[derive(Debug)]
@@ -61,7 +67,7 @@ where
                 public_execution_id,
                 preprocessed_private: VecDeque::new(),
                 preprocessed_public: VecDeque::new(),
-                key: None,
+                key_and_iv: None,
             },
             executor,
             _cipher: PhantomData,
@@ -124,8 +130,9 @@ where
     E: Memory + Load + Execute + Decode + DecodePrivate + Send + Sync + Send,
 {
     #[instrument(level = "trace", skip_all)]
-    fn set_key(&mut self, key: ValueRef) {
-        self.state.key = Some(key);
+    fn set_key(&mut self, key: ValueRef, iv: ValueRef) {
+        let key_and_iv = EncodedKeyAndIv { key, iv };
+        self.state.key_and_iv = Some(key_and_iv);
     }
 
     #[instrument(level = "debug", skip_all, err)]
@@ -136,9 +143,10 @@ where
     ) -> Result<(), BlockCipherError> {
         let key = self
             .state
-            .key
+            .key_and_iv
             .clone()
-            .ok_or_else(|| BlockCipherError::key_not_set())?;
+            .ok_or_else(|| BlockCipherError::key_not_set())?
+            .key;
 
         for _ in 0..count {
             let vars = self.define_block(visibility);
@@ -171,9 +179,10 @@ where
 
         let key = self
             .state
-            .key
+            .key_and_iv
             .clone()
-            .ok_or_else(|| BlockCipherError::key_not_set())?;
+            .ok_or_else(|| BlockCipherError::key_not_set())?
+            .key;
 
         let BlockVars { msg, ciphertext } =
             if let Some(vars) = self.state.preprocessed_private.pop_front() {
@@ -207,9 +216,10 @@ where
     async fn encrypt_blind(&mut self) -> Result<Vec<u8>, BlockCipherError> {
         let key = self
             .state
-            .key
+            .key_and_iv
             .clone()
-            .ok_or_else(|| BlockCipherError::key_not_set())?;
+            .ok_or_else(|| BlockCipherError::key_not_set())?
+            .key;
 
         let BlockVars { msg, ciphertext } =
             if let Some(vars) = self.state.preprocessed_private.pop_front() {
@@ -246,9 +256,10 @@ where
 
         let key = self
             .state
-            .key
+            .key_and_iv
             .clone()
-            .ok_or_else(|| BlockCipherError::key_not_set())?;
+            .ok_or_else(|| BlockCipherError::key_not_set())?
+            .key;
 
         let BlockVars { msg, ciphertext } =
             if let Some(vars) = self.state.preprocessed_public.pop_front() {
@@ -273,5 +284,41 @@ where
             };
 
         Ok(share.into())
+    }
+
+    #[instrument(level = "debug", skip_all, err)]
+    async fn share_keystream_block(
+        &mut self,
+        explicit_nonce: Vec<u8>,
+        ctr: usize,
+    ) -> Result<Vec<u8>, BlockCipherError> {
+        let EncodedKeyAndIv { key, iv } = self
+            .state
+            .key_and_iv
+            .as_ref()
+            .ok_or_else(|| BlockCipherError::key_not_set())?;
+
+        //        let key_block = self
+        //            .state
+        //            .keystream
+        //            .compute(
+        //                &mut self.thread,
+        //                ExecutionMode::Mpc,
+        //                key,
+        //                iv,
+        //                explicit_nonce,
+        //                ctr,
+        //                C::BLOCK_LEN,
+        //            )
+        //            .await?;
+        //
+        //        let share = self
+        //            .decode_shared(key_block)
+        //            .await?
+        //            .try_into()
+        //            .expect("key block is array");
+        //
+        //        Ok(share);
+        todo!()
     }
 }

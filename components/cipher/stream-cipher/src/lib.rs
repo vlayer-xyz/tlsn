@@ -170,18 +170,6 @@ where
         explicit_nonce: Vec<u8>,
         ciphertext: Vec<u8>,
     ) -> Result<(), StreamCipherError>;
-
-    /// Returns an additive share of the keystream block for the given explicit nonce and counter.
-    ///
-    /// # Arguments
-    ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream block.
-    /// * `ctr` - The counter to use for the keystream block.
-    async fn share_keystream_block(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        ctr: usize,
-    ) -> Result<Vec<u8>, StreamCipherError>;
 }
 
 #[cfg(test)]

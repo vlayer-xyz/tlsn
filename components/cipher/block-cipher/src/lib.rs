@@ -113,18 +113,21 @@ mod tests {
 
         let (leader_vm, follower_vm) = create_mock_deap_vm();
 
-        // Key is public just for this test, typically it is private.
+        // Key and iv are public just for this test, typically they are private.
         let leader_key = leader_vm.new_public_input::<[u8; 16]>("key").unwrap();
+        let leader_iv = leader_vm.new_public_input::<[u8; 4]>("iv").unwrap();
+
         let follower_key = follower_vm.new_public_input::<[u8; 16]>("key").unwrap();
+        let follower_iv = follower_vm.new_public_input::<[u8; 4]>("iv").unwrap();
 
         leader_vm.assign(&leader_key, key).unwrap();
         follower_vm.assign(&follower_key, key).unwrap();
 
         let mut leader = MpcBlockCipher::<Aes128, _>::new(leader_config, leader_vm);
-        leader.set_key(leader_key);
+        leader.set_key(leader_key, leader_iv);
 
         let mut follower = MpcBlockCipher::<Aes128, _>::new(follower_config, follower_vm);
-        follower.set_key(follower_key);
+        follower.set_key(follower_key, follower_iv);
 
         let plaintext = [0u8; 16];
 
@@ -149,18 +152,21 @@ mod tests {
 
         let (leader_vm, follower_vm) = create_mock_deap_vm();
 
-        // Key is public just for this test, typically it is private.
+        // Key and iv are public just for this test, typically they are private.
         let leader_key = leader_vm.new_public_input::<[u8; 16]>("key").unwrap();
+        let leader_iv = leader_vm.new_public_input::<[u8; 4]>("iv").unwrap();
+
         let follower_key = follower_vm.new_public_input::<[u8; 16]>("key").unwrap();
+        let follower_iv = follower_vm.new_public_input::<[u8; 4]>("iv").unwrap();
 
         leader_vm.assign(&leader_key, key).unwrap();
         follower_vm.assign(&follower_key, key).unwrap();
 
         let mut leader = MpcBlockCipher::<Aes128, _>::new(leader_config, leader_vm);
-        leader.set_key(leader_key);
+        leader.set_key(leader_key, leader_iv);
 
         let mut follower = MpcBlockCipher::<Aes128, _>::new(follower_config, follower_vm);
-        follower.set_key(follower_key);
+        follower.set_key(follower_key, follower_iv);
 
         let plaintext = [0u8; 16];
 
@@ -186,18 +192,21 @@ mod tests {
 
         let (leader_vm, follower_vm) = create_mock_deap_vm();
 
-        // Key is public just for this test, typically it is private.
+        // Key and iv are public just for this test, typically they are private.
         let leader_key = leader_vm.new_public_input::<[u8; 16]>("key").unwrap();
+        let leader_iv = leader_vm.new_public_input::<[u8; 4]>("iv").unwrap();
+
         let follower_key = follower_vm.new_public_input::<[u8; 16]>("key").unwrap();
+        let follower_iv = follower_vm.new_public_input::<[u8; 4]>("iv").unwrap();
 
         leader_vm.assign(&leader_key, key).unwrap();
         follower_vm.assign(&follower_key, key).unwrap();
 
         let mut leader = MpcBlockCipher::<Aes128, _>::new(leader_config, leader_vm);
-        leader.set_key(leader_key);
+        leader.set_key(leader_key, leader_iv);
 
         let mut follower = MpcBlockCipher::<Aes128, _>::new(follower_config, follower_vm);
-        follower.set_key(follower_key);
+        follower.set_key(follower_key, follower_iv);
 
         let plaintext = [0u8; 16];
 

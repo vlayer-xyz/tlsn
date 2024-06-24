@@ -101,11 +101,10 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
     #[instrument(level = "debug", skip(self), err)]
     async fn preprocess(&mut self, len: usize) -> Result<(), AesGcmError> {
         futures::try_join!(
-            // Preprocess the GHASH key block.
+            // Preprocess 1 block for the GHASH key and `len` blocks for the j0 blocks.
             self.aes_block
-                .preprocess(block_cipher::Visibility::Public, 1)
+                .preprocess(block_cipher::Visibility::Public, 1 + len)
                 .map_err(AesGcmError::from),
-            // TODO Add preprocess for aes_block for j0.
             self.aes_ctr.preprocess(len).map_err(AesGcmError::from),
             self.ghash.preprocess().map_err(AesGcmError::from),
         )?;

@@ -5,6 +5,7 @@ use mpz_circuits::{
     types::{StaticValueType, Value},
     Circuit,
 };
+use tlsn_stream_cipher::AES_CTR;
 
 /// A block cipher circuit.
 pub trait BlockCipherCircuit: Default + Clone + Send + Sync {
@@ -20,11 +21,16 @@ pub trait BlockCipherCircuit: Default + Clone + Send + Sync {
 
     /// Returns the circuit of the cipher.
     fn circuit() -> Arc<Circuit>;
+
+    /// Returns the cipher circuit in counter mode.
+    fn circuit_ctr() -> Arc<Circuit>;
 }
 
 /// Aes128 block cipher circuit.
 #[derive(Default, Debug, Clone)]
 pub struct Aes128;
+
+impl Aes128 {}
 
 impl BlockCipherCircuit for Aes128 {
     type KEY = [u8; 16];
@@ -35,5 +41,9 @@ impl BlockCipherCircuit for Aes128 {
 
     fn circuit() -> Arc<Circuit> {
         AES128.clone()
+    }
+
+    fn circuit_ctr() -> Arc<Circuit> {
+        AES_CTR.clone()
     }
 }

@@ -13,7 +13,7 @@ use std::sync::Arc;
 /// # Outputs
 ///
 ///   0. ECB: 16-byte output
-pub(crate) static AES_CTR: Lazy<Arc<Circuit>> = Lazy::new(|| {
+pub static AES_CTR: Lazy<Arc<Circuit>> = Lazy::new(|| {
     let builder = CircuitBuilder::new();
     let key = builder.add_array_input::<u8, 16>();
     let iv = builder.add_array_input::<u8, 4>();

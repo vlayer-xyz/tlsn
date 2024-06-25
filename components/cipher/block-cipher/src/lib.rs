@@ -48,11 +48,18 @@ where
     ///
     /// * `visibility` - The visibility of the plaintext.
     /// * `count` - The number of blocks to preprocess.
-    async fn preprocess(
+    async fn preprocess_blocks(
         &mut self,
         visibility: Visibility,
         count: usize,
     ) -> Result<(), BlockCipherError>;
+
+    /// Preprocesses `count` j0 blocks.
+    ///
+    /// # Arguments
+    ///
+    /// * `count` - The number of j0 blocks to preprocess.
+    async fn preprocess_counters(&mut self, count: usize) -> Result<(), BlockCipherError>;
 
     /// Encrypts the given plaintext keeping it hidden from the other party(s).
     ///
@@ -259,8 +266,8 @@ mod tests {
         let plaintext = [0u8; 16];
 
         tokio::try_join!(
-            leader.preprocess(Visibility::Private, 1),
-            follower.preprocess(Visibility::Blind, 1)
+            leader.preprocess_blocks(Visibility::Private, 1),
+            follower.preprocess_blocks(Visibility::Blind, 1)
         )
         .unwrap();
 
@@ -276,8 +283,8 @@ mod tests {
         assert_eq!(leader_ciphertext, follower_ciphertext);
 
         tokio::try_join!(
-            leader.preprocess(Visibility::Public, 1),
-            follower.preprocess(Visibility::Public, 1)
+            leader.preprocess_blocks(Visibility::Public, 1),
+            follower.preprocess_blocks(Visibility::Public, 1)
         )
         .unwrap();
 

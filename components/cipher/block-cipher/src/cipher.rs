@@ -12,8 +12,10 @@ use crate::{BlockCipher, BlockCipherCircuit, BlockCipherConfig, BlockCipherError
 struct State {
     private_execution_id: NestedId,
     public_execution_id: NestedId,
+    j0_execution_id: NestedId,
     preprocessed_private: VecDeque<BlockVars>,
     preprocessed_public: VecDeque<BlockVars>,
+    preprocessed_j0: VecDeque<CounterVars>,
     key_and_iv: Option<EncodedKeyAndIv>,
 }
 
@@ -26,6 +28,13 @@ struct EncodedKeyAndIv {
 #[derive(Debug)]
 struct BlockVars {
     msg: ValueRef,
+    ciphertext: ValueRef,
+}
+
+#[derive(Debug)]
+struct CounterVars {
+    nonce: ValueRef,
+    ctr: ValueRef,
     ciphertext: ValueRef,
 }
 
@@ -61,12 +70,18 @@ where
         let public_execution_id = NestedId::new(&config.id)
             .append_string("public")
             .append_counter();
+        let j0_execution_id = NestedId::new(&config.id)
+            .append_string("j0")
+            .append_counter();
+
         Self {
             state: State {
                 private_execution_id,
                 public_execution_id,
+                j0_execution_id,
                 preprocessed_private: VecDeque::new(),
                 preprocessed_public: VecDeque::new(),
+                preprocessed_j0: VecDeque::new(),
                 key_and_iv: None,
             },
             executor,
@@ -121,6 +136,29 @@ where
 
         BlockVars { msg, ciphertext }
     }
+
+    fn define_counters(&mut self) -> CounterVars {
+        let id = self.state.j0_execution_id.increment_in_place().to_string();
+
+        let nonce = self
+            .executor
+            .new_public_input::<[u8; 8]>(&format!("{}/nonce", &id))
+            .expect("nonce should be defined");
+        let ctr = self
+            .executor
+            .new_public_input::<[u8; 4]>(&format!("{}/ctr", &id))
+            .expect("counter should be defined");
+        let ciphertext = self
+            .executor
+            .new_output::<C::BLOCK>(&format!("{}/ciphertext", &id))
+            .expect("message is not defined");
+
+        CounterVars {
+            nonce,
+            ctr,
+            ciphertext,
+        }
+    }
 }
 
 #[async_trait]
@@ -136,7 +174,7 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    async fn preprocess(
+    async fn preprocess_blocks(
         &mut self,
         visibility: Visibility,
         count: usize,
@@ -165,6 +203,36 @@ where
                 }
                 Visibility::Public => self.state.preprocessed_public.push_back(vars),
             }
+        }
+
+        Ok(())
+    }
+
+    #[instrument(level = "debug", skip_all, err)]
+    async fn preprocess_counters(&mut self, count: usize) -> Result<(), BlockCipherError> {
+        let EncodedKeyAndIv { key, iv } = self
+            .state
+            .key_and_iv
+            .clone()
+            .ok_or_else(|| BlockCipherError::key_not_set())?;
+
+        for _ in 0..count {
+            let vars = self.define_counters();
+
+            self.executor
+                .load(
+                    C::circuit_ctr(),
+                    &[
+                        key.clone(),
+                        iv.clone(),
+                        vars.nonce.clone(),
+                        vars.ctr.clone(),
+                    ],
+                    &[vars.ciphertext.clone()],
+                )
+                .await?;
+
+            self.state.preprocessed_j0.push_back(vars);
         }
 
         Ok(())
@@ -301,23 +369,28 @@ where
             .cloned()
             .ok_or_else(|| BlockCipherError::key_not_set())?;
 
-        let BlockVars { msg, ciphertext } =
-            if let Some(vars) = self.state.preprocessed_public.pop_front() {
-                vars
-            } else {
-                self.define_block(Visibility::Public)
-            };
+        let CounterVars {
+            nonce,
+            ctr,
+            ciphertext,
+        } = if let Some(vars) = self.state.preprocessed_j0.pop_front() {
+            vars
+        } else {
+            self.define_counters()
+        };
 
-        self.executor.assign(
-            &msg,
-            [explicit_nonce, (1 as u32).to_be_bytes().to_vec()].concat(),
-        )?;
+        self.executor.assign(&nonce, explicit_nonce)?;
+        self.executor.assign(&ctr, (1 as u32).to_be_bytes())?;
 
         self.executor
-            .commit(&[key.clone(), iv.clone(), msg.clone()])
+            .commit(&[key.clone(), iv.clone(), nonce.clone(), ctr.clone()])
             .await?;
         self.executor
-            .execute(C::circuit(), &[key, iv, msg], &[ciphertext.clone()])
+            .execute(
+                C::circuit_ctr(),
+                &[key, iv, nonce, ctr],
+                &[ciphertext.clone()],
+            )
             .await?;
 
         let mut outputs = self.executor.decode_shared(&[ciphertext]).await?;

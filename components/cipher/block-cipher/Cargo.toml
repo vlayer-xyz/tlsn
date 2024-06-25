@@ -24,6 +24,8 @@ thiserror.workspace = true
 derive_builder.workspace = true
 tracing.workspace = true
 
+tlsn-stream-cipher.workspace = true
+
 [dev-dependencies]
 aes.workspace = true
 cipher.workspace = true

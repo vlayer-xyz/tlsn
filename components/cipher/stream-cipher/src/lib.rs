@@ -24,6 +24,7 @@ pub(crate) mod keystream;
 mod stream_cipher;
 
 pub use self::cipher::{Aes128Ctr, CtrCircuit};
+pub use circuit::AES_CTR;
 pub use config::{StreamCipherConfig, StreamCipherConfigBuilder, StreamCipherConfigBuilderError};
 pub use error::StreamCipherError;
 pub use stream_cipher::MpcStreamCipher;

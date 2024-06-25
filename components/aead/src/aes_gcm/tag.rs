@@ -68,13 +68,13 @@ pub(crate) async fn compute_tag<
     H: UniversalHash + ?Sized,
 >(
     ctx: &mut Ctx,
-    aes_ctr: &mut C,
+    aes_block: &mut C,
     hasher: &mut H,
     explicit_nonce: Vec<u8>,
     ciphertext: Vec<u8>,
     aad: Vec<u8>,
 ) -> Result<[u8; TAG_LEN], AesGcmError> {
-    let tag_share = compute_tag_share(aes_ctr, hasher, explicit_nonce, ciphertext, aad).await?;
+    let tag_share = compute_tag_share(aes_block, hasher, explicit_nonce, ciphertext, aad).await?;
 
     // TODO: The follower doesn't really need to learn the tag,
     // we could reduce some latency by not sending it.
@@ -99,7 +99,7 @@ pub(crate) async fn verify_tag<
     H: UniversalHash + ?Sized,
 >(
     ctx: &mut Ctx,
-    aes_ctr: &mut C,
+    aes_block: &mut C,
     hasher: &mut H,
     role: Role,
     explicit_nonce: Vec<u8>,
@@ -107,7 +107,7 @@ pub(crate) async fn verify_tag<
     aad: Vec<u8>,
     purported_tag: [u8; TAG_LEN],
 ) -> Result<(), AesGcmError> {
-    let tag_share = compute_tag_share(aes_ctr, hasher, explicit_nonce, ciphertext, aad).await?;
+    let tag_share = compute_tag_share(aes_block, hasher, explicit_nonce, ciphertext, aad).await?;
 
     let io = ctx.io_mut();
     let tag = match role {

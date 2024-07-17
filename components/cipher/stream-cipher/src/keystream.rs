@@ -1,8 +1,6 @@
-use crate::{CtrCircuit, KeyStream, StreamCipherError};
-use async_trait::async_trait;
-use mpz_circuits::Circuit;
+use crate::{CtrCircuit, StreamCipherError};
 use mpz_garble::{value::ValueRef, Decode, DecodePrivate, Execute, Load, Thread};
-use std::{collections::VecDeque, marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 use tracing::instrument;
 use utils::id::NestedId;
 
@@ -20,7 +18,7 @@ where
     C: CtrCircuit,
     E: Thread + Load + Execute + Decode + DecodePrivate + Send + Sync,
 {
-    pub(crate) fn new(id: &str, thread: E) -> Self {
+    pub fn new(id: &str, thread: E) -> Self {
         let block_counter = NestedId::new(id).append_counter();
         Self {
             key: None,
@@ -30,6 +28,54 @@ where
             preprocessed: None,
             _pd: PhantomData,
         }
+    }
+    pub fn set_key_and_iv(&mut self, key: ValueRef, iv: ValueRef) {
+        self.key = Some(key);
+        self.iv = Some(iv);
+    }
+
+    #[instrument(level = "debug", skip_all, err)]
+    pub async fn preprocess(&mut self, len: usize) -> Result<(), StreamCipherError> {
+        let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
+        let calls = self.define_calls(block_count)?;
+
+        let inputs = calls.iter_inputs();
+        let outputs = calls.iter_outputs();
+        for (input, output) in inputs.zip(outputs) {
+            self.thread
+                .load(C::circuit(), input.as_ref(), &[output])
+                .await?;
+        }
+
+        if let Some(preprocessed) = self.preprocessed.as_mut() {
+            preprocessed.extend(calls);
+        } else {
+            self.preprocessed = Some(calls);
+        }
+
+        Ok(())
+    }
+
+    #[instrument(level = "debug", skip_all, err)]
+    pub async fn setup_keystream(
+        &mut self,
+        explicit_nonce: Vec<u8>,
+        start_ctr: usize,
+        len: usize,
+    ) -> Result<Calls, StreamCipherError> {
+        let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
+
+        // Take any preprocessed blocks if available, and define new ones if needed.
+        let calls = if let Some(preprocessed) = self.preprocessed.as_mut() {
+            let mut calls = preprocessed.drain(block_count);
+            calls.extend(self.define_calls(block_count - calls.len())?);
+            calls
+        } else {
+            self.define_calls(block_count)?
+        };
+
+        calls.assign::<C, E>(&mut self.thread, explicit_nonce, start_ctr)?;
+        Ok(calls)
     }
 
     fn key(&self) -> Result<ValueRef, StreamCipherError> {
@@ -63,73 +109,8 @@ where
     }
 }
 
-#[async_trait]
-impl<C, E> KeyStream for MpcKeyStream<C, E>
-where
-    C: CtrCircuit,
-    E: Thread + Load + Execute + Decode + DecodePrivate + Send + Sync,
-{
-    fn set_key_and_iv(&mut self, key: ValueRef, iv: ValueRef) {
-        self.key = Some(key);
-        self.iv = Some(iv);
-    }
-
-    #[instrument(level = "debug", skip_all, err)]
-    async fn preprocess(&mut self, len: usize) -> Result<(), StreamCipherError> {
-        let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
-        let calls = self.define_calls(block_count)?;
-
-        let inputs = calls.iter_inputs();
-        let outputs = calls.iter_outputs();
-        for (input, output) in inputs.zip(outputs) {
-            self.thread
-                .load(C::circuit(), input.as_ref(), &[output])
-                .await?;
-        }
-
-        if let Some(preprocessed) = self.preprocessed.as_mut() {
-            preprocessed.extend(calls);
-        } else {
-            self.preprocessed = Some(calls);
-        }
-
-        Ok(())
-    }
-
-    #[instrument(level = "debug", skip_all, err)]
-    async fn setup_keystream(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        start_ctr: usize,
-        len: usize,
-    ) -> Result<Calls, StreamCipherError> {
-        let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
-
-        // Take any preprocessed blocks if available, and define new ones if needed.
-        let calls = if let Some(preprocessed) = self.preprocessed.as_mut() {
-            let mut calls = preprocessed.drain(block_count);
-            calls.extend(self.define_calls(block_count - calls.len())?);
-            calls
-        } else {
-            self.define_calls(block_count)?
-        };
-
-        calls.assign::<C, E>(&mut self.thread, explicit_nonce, start_ctr)?;
-        Ok(calls)
-    }
-
-    async fn share_zero_block(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        ctr: usize,
-    ) -> Result<Vec<u8>, StreamCipherError> {
-        let keystream = self.setup_keystream(explicit_nonce, 1, 1).await?;
-        todo!()
-    }
-}
-
 #[derive(Debug)]
-struct Calls {
+pub struct Calls {
     key: ValueRef,
     iv: ValueRef,
     nonces: Vec<ValueRef>,

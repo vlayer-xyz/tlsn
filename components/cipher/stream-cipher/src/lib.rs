@@ -152,35 +152,6 @@ pub trait ZkProve: Send + Sync {
     ) -> Result<(), StreamCipherError>;
 }
 
-#[async_trait]
-pub trait KeyStream: Send + Sync {
-    /// Sets iv for the keystream.
-    fn set_key_and_iv(&mut self, key: ValueRef, iv: ValueRef);
-
-    /// Preprocesses the keystream for the given number of bytes.
-    async fn preprocess(&mut self, len: usize) -> Result<(), StreamCipherError>;
-
-    /// Returns the key stream references for the provided values.
-    async fn setup_keystream(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        start_ctr: usize,
-        len: usize,
-    ) -> Result<ValueRef, StreamCipherError>;
-
-    /// Returns an additive share of the keystream block for the given explicit nonce and counter.
-    ///
-    /// # Arguments
-    ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream block.
-    /// * `ctr` - The counter to use for the keystream block.
-    async fn share_zero_block(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        ctr: usize,
-    ) -> Result<Vec<u8>, StreamCipherError>;
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;

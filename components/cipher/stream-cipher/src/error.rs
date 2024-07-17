@@ -59,7 +59,7 @@ impl StreamCipherError {
         }
     }
 
-    pub(crate) fn iv_not_set<C: CtrCircuit>() -> Self {
+    pub(crate) fn iv_not_set() -> Self {
         Self {
             kind: ErrorKind::Iv,
             source: Some(format!("iv not set").into()),

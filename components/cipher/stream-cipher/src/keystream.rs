@@ -11,7 +11,7 @@ pub(crate) struct MpcKeyStream<C, E> {
     key: Option<ValueRef>,
     iv: Option<ValueRef>,
     block_counter: NestedId,
-    preprocessed: BlockVars,
+    preprocessed: Option<Calls>,
     _pd: PhantomData<C>,
 }
 
@@ -27,7 +27,7 @@ where
             iv: None,
             thread,
             block_counter,
-            preprocessed: BlockVars::default(),
+            preprocessed: None,
             _pd: PhantomData,
         }
     }
@@ -41,69 +41,25 @@ where
     fn iv(&self) -> Result<ValueRef, StreamCipherError> {
         self.iv
             .clone()
-            .ok_or_else(|| StreamCipherError::key_not_set())
+            .ok_or_else(|| StreamCipherError::iv_not_set())
     }
 
-    async fn preprocess_shared(&mut self, len: usize) -> Result<(), StreamCipherError> {}
-
-    async fn preprocess(&mut self, len: usize) -> Result<(), StreamCipherError> {
-        self.preprocess_for(C::circuit(), len).await
-    }
-
-    async fn preprocess_for(
-        &mut self,
-        circuit: Arc<Circuit>,
-        len: usize,
-    ) -> Result<(), StreamCipherError> {
-        let key = self.key()?;
-        let iv = self.iv()?;
-
-        let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
-        let vars = self.define_vars(block_count, circuit)?;
-
-        let calls = vars
-            .iter()
-            .map(|(circuit, block, nonce, ctr)| {
-                (
-                    circuit,
-                    vec![key.clone(), iv.clone(), nonce.clone(), ctr.clone()],
-                    vec![block.clone()],
-                )
-            })
-            .collect::<Vec<_>>();
-
-        for (circ, inputs, outputs) in calls {
-            self.thread.load(circ.clone(), &inputs, &outputs).await?;
-        }
-
-        self.preprocessed.extend(vars);
-
-        Ok(())
-    }
-
-    fn define_vars(
-        &mut self,
-        count: usize,
-        circuit: Arc<Circuit>,
-    ) -> Result<BlockVars, StreamCipherError> {
-        let mut vars = BlockVars::default();
+    fn define_calls(&mut self, count: usize) -> Result<Calls, StreamCipherError> {
+        let mut calls = Calls::new(self.key()?, self.iv()?);
         for _ in 0..count {
             let block_id = self.block_counter.increment_in_place();
-            let block = self.thread.new_output::<C::BLOCK>(&block_id.to_string())?;
             let nonce = self
                 .thread
                 .new_public_input::<C::NONCE>(&block_id.append_string("nonce").to_string())?;
             let ctr = self
                 .thread
                 .new_public_input::<[u8; 4]>(&block_id.append_string("ctr").to_string())?;
+            let block = self.thread.new_output::<C::BLOCK>(&block_id.to_string())?;
 
-            vars.circuits.push_back(circuit.clone());
-            vars.blocks.push_back(block);
-            vars.nonces.push_back(nonce);
-            vars.ctrs.push_back(ctr);
+            calls.push(nonce, ctr, block);
         }
 
-        Ok(vars)
+        Ok(calls)
     }
 }
 
@@ -120,28 +76,22 @@ where
 
     #[instrument(level = "debug", skip_all, err)]
     async fn preprocess(&mut self, len: usize) -> Result<(), StreamCipherError> {
-        let key = self.key()?;
-        let iv = self.iv()?;
-
         let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
-        let vars = self.define_vars(block_count)?;
+        let calls = self.define_calls(block_count)?;
 
-        let calls = vars
-            .iter()
-            .map(|(circuit, block, nonce, ctr)| {
-                (
-                    circuit,
-                    vec![key.clone(), iv.clone(), nonce.clone(), ctr.clone()],
-                    vec![block.clone()],
-                )
-            })
-            .collect::<Vec<_>>();
-
-        for (circ, inputs, outputs) in calls {
-            self.thread.load(circ.clone(), &inputs, &outputs).await?;
+        let inputs = calls.iter_inputs();
+        let outputs = calls.iter_outputs();
+        for (input, output) in inputs.zip(outputs) {
+            self.thread
+                .load(C::circuit(), input.as_ref(), &[output])
+                .await?;
         }
 
-        self.preprocessed.extend(vars);
+        if let Some(preprocessed) = self.preprocessed.as_mut() {
+            preprocessed.extend(calls);
+        } else {
+            self.preprocessed = Some(calls);
+        }
 
         Ok(())
     }
@@ -152,53 +102,20 @@ where
         explicit_nonce: Vec<u8>,
         start_ctr: usize,
         len: usize,
-    ) -> Result<ValueRef, StreamCipherError> {
-        let key = self.key()?;
-        let iv = self.iv()?;
-
+    ) -> Result<Calls, StreamCipherError> {
         let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
-        let explicit_nonce_len = explicit_nonce.len();
-        let explicit_nonce: C::NONCE = explicit_nonce
-            .try_into()
-            .map_err(|_| StreamCipherError::explicit_nonce_len::<C>(explicit_nonce_len))?;
 
         // Take any preprocessed blocks if available, and define new ones if needed.
-        let vars = if !self.preprocessed.is_empty() {
-            let mut vars = self
-                .preprocessed
-                .drain(block_count.min(self.preprocessed.len()));
-            if vars.len() < block_count {
-                vars.extend(self.define_vars(block_count - vars.len())?)
-            }
-            vars
+        let calls = if let Some(preprocessed) = self.preprocessed.as_mut() {
+            let mut calls = preprocessed.drain(block_count);
+            calls.extend(self.define_calls(block_count - calls.len())?);
+            calls
         } else {
-            self.define_vars(block_count)?
+            self.define_calls(block_count)?
         };
 
-        let mut calls = Vec::with_capacity(vars.len());
-        let mut inputs = Vec::with_capacity(vars.len() * 4);
-        for (i, (_, block, nonce_ref, ctr_ref)) in vars.iter().enumerate() {
-            self.thread.assign(nonce_ref, explicit_nonce)?;
-            self.thread
-                .assign(ctr_ref, ((start_ctr + i) as u32).to_be_bytes())?;
-
-            inputs.push(key.clone());
-            inputs.push(iv.clone());
-            inputs.push(nonce_ref.clone());
-            inputs.push(ctr_ref.clone());
-
-            // TODO: Circuit should not be part of this.
-            calls.push((
-                C::circuit(),
-                vec![key.clone(), iv.clone(), nonce_ref.clone(), ctr_ref.clone()],
-                vec![block.clone()],
-            ));
-        }
-
-        let keystream = self.thread.array_from_values(&vars.blocks(len))?;
-        // TODO: We need to return more here than just the keysteam, if we want to separate the
-        // execution.
-        Ok(keystream)
+        calls.assign::<C, E>(&mut self.thread, explicit_nonce, start_ctr)?;
+        Ok(calls)
     }
 
     async fn share_zero_block(
@@ -211,15 +128,26 @@ where
     }
 }
 
-#[derive(Default)]
-struct BlockVars {
-    circuits: VecDeque<Arc<Circuit>>,
-    nonces: VecDeque<ValueRef>,
-    ctrs: VecDeque<ValueRef>,
-    blocks: VecDeque<ValueRef>,
+#[derive(Debug)]
+struct Calls {
+    key: ValueRef,
+    iv: ValueRef,
+    nonces: Vec<ValueRef>,
+    ctrs: Vec<ValueRef>,
+    blocks: Vec<ValueRef>,
 }
 
-impl BlockVars {
+impl Calls {
+    fn new(key: ValueRef, iv: ValueRef) -> Self {
+        Calls {
+            key,
+            iv,
+            nonces: Vec::default(),
+            ctrs: Vec::default(),
+            blocks: Vec::default(),
+        }
+    }
+
     fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
@@ -228,37 +156,63 @@ impl BlockVars {
         self.blocks.len()
     }
 
-    fn drain(&mut self, count: usize) -> BlockVars {
-        let circuits = self.circuits.drain(0..count).collect();
+    fn drain(&mut self, count: usize) -> Calls {
         let nonces = self.nonces.drain(0..count).collect();
         let ctrs = self.ctrs.drain(0..count).collect();
         let blocks = self.blocks.drain(0..count).collect();
 
-        BlockVars {
-            circuits,
+        Calls {
+            key: self.key.clone(),
+            iv: self.iv.clone(),
             nonces,
             ctrs,
             blocks,
         }
     }
 
-    fn extend(&mut self, vars: BlockVars) {
-        self.circuits.extend(vars.circuits);
-        self.blocks.extend(vars.blocks);
+    fn push(&mut self, nonce: ValueRef, ctr: ValueRef, block: ValueRef) {
+        self.nonces.push(nonce);
+        self.ctrs.push(ctr);
+        self.blocks.push(block);
+    }
+
+    fn extend(&mut self, vars: Calls) {
         self.nonces.extend(vars.nonces);
         self.ctrs.extend(vars.ctrs);
+        self.blocks.extend(vars.blocks);
     }
 
-    fn iter(&self) -> impl Iterator<Item = (&Arc<Circuit>, &ValueRef, &ValueRef, &ValueRef)> {
-        self.circuits
+    fn iter_inputs<'a>(&'a self) -> impl Iterator<Item = [ValueRef; 4]> + 'a {
+        self.nonces
             .iter()
-            .zip(self.nonces.iter())
-            .zip(self.ctrs.iter())
-            .zip(self.blocks.iter())
-            .map(|(((circuit, block), nonce), ctr)| (circuit, block, nonce, ctr))
+            .cloned()
+            .zip(self.ctrs.iter().cloned())
+            .map(|(nonce, ctr)| [self.key.clone(), self.iv.clone(), nonce, ctr])
     }
 
-    fn blocks(&self, len: usize) -> Vec<ValueRef> {
+    fn iter_outputs(&self) -> impl Iterator<Item = ValueRef> + '_ {
+        self.blocks.iter().cloned()
+    }
+
+    fn assign<C: CtrCircuit, E: Thread>(
+        &self,
+        thread: &mut E,
+        explicit_nonce: Vec<u8>,
+        start_ctr: usize,
+    ) -> Result<(), StreamCipherError> {
+        let explicit_nonce_len = explicit_nonce.len();
+        let explicit_nonce: C::NONCE = explicit_nonce
+            .try_into()
+            .map_err(|_| StreamCipherError::explicit_nonce_len::<C>(explicit_nonce_len))?;
+
+        for (k, [_, _, nonce, ctr]) in self.iter_inputs().enumerate() {
+            thread.assign(&nonce, explicit_nonce)?;
+            thread.assign(&ctr, ((start_ctr + k) as u32).to_be_bytes())?;
+        }
+        Ok(())
+    }
+
+    fn take_blocks(&self, len: usize) -> Vec<ValueRef> {
         self.blocks
             .iter()
             .flat_map(|block| block.iter())

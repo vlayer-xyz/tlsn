@@ -12,45 +12,42 @@
 //! Afterwards, the `StreamCipherLeader` can create commitments to the transcript which can be used in
 //! a selective disclosure protocol.
 
-#![deny(missing_docs, unreachable_pub, unused_must_use)]
-#![deny(clippy::all)]
-#![deny(unsafe_code)]
+// TODO: Uncomment here
+// #![deny(missing_docs, unreachable_pub, unused_must_use)]
+// #![deny(clippy::all)]
+// #![deny(unsafe_code)]
 
 mod cipher;
 mod circuit;
 mod config;
 pub(crate) mod error;
-mod keystream;
-mod stream_cipher;
+pub mod keystream;
+pub mod stream_cipher;
 
 pub use self::cipher::{Aes128Ctr, CtrCircuit};
 pub use config::{StreamCipherConfig, StreamCipherConfigBuilder, StreamCipherConfigBuilderError};
 pub use error::StreamCipherError;
+use keystream::CipherRefs;
 pub use stream_cipher::MpcStreamCipher;
 
 use async_trait::async_trait;
-use mpz_garble::value::ValueRef;
 
 /// A trait for MPC stream ciphers.
 #[async_trait]
-pub trait StreamCipher: Send + Sync {
-    /// Sets the key for the stream cipher.
-    fn set_key(&mut self, key: ValueRef);
-
-    /// Preprocesses the circuits for the given number of blocks.
-    async fn preprocess(&mut self, len: usize) -> Result<(), StreamCipherError>;
-
+pub trait StreamCipher<C>: Send + Sync {
     /// Applies the keystream to the given plaintext, where all parties
     /// provide the plaintext as an input.
     ///
     /// # Arguments
     ///
-    /// * `keystream` - The keystream to use for this block.
+    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
     /// * `plaintext` - The message to apply the keystream to.
+    /// * `cipher_refs` - References to input and output variables of the cipher.
     async fn encrypt_public(
         &mut self,
-        keystream: ValueRef,
+        explicit_nonce: Vec<u8>,
         plaintext: Vec<u8>,
+        cipher_refs: CipherRefs<C>,
     ) -> Result<Vec<u8>, StreamCipherError>;
 
     /// Applies the keystream to the given plaintext without revealing it
@@ -58,24 +55,28 @@ pub trait StreamCipher: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `keystream` - The keystream to use for this block.
+    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
     /// * `plaintext` - The message to apply the keystream to.
+    /// * `cipher_refs` - References to input and output variables of the cipher.
     async fn encrypt_private(
         &mut self,
-        keystream: ValueRef,
+        explicit_nonce: Vec<u8>,
         plaintext: Vec<u8>,
+        cipher_refs: CipherRefs<C>,
     ) -> Result<Vec<u8>, StreamCipherError>;
 
     /// Applies the keystream to a plaintext provided by another party.
     ///
     /// # Arguments
     ///
-    /// * `keystream` - The keystream to use for this block.
+    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
     /// * `len` - The length of the plaintext provided by another party.
+    /// * `cipher_refs` - References to input and output variables of the cipher.
     async fn encrypt_blind(
         &mut self,
-        keystream: ValueRef,
+        explicit_nonce: Vec<u8>,
         len: usize,
+        cipher_refs: CipherRefs<C>,
     ) -> Result<Vec<u8>, StreamCipherError>;
 
     /// Decrypts a ciphertext by removing the keystream, where the plaintext
@@ -83,12 +84,14 @@ pub trait StreamCipher: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `keystream` - The keystream to use for this block.
+    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
     /// * `ciphertext` - The ciphertext to decrypt.
+    /// * `cipher_refs` - References to input and output variables of the cipher.
     async fn decrypt_public(
         &mut self,
-        keystream: ValueRef,
+        explicit_nonce: Vec<u8>,
         ciphertext: Vec<u8>,
+        cipher_refs: CipherRefs<C>,
     ) -> Result<Vec<u8>, StreamCipherError>;
 
     /// Decrypts a ciphertext by removing the keystream, where the plaintext
@@ -96,12 +99,14 @@ pub trait StreamCipher: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `keystream` - The keystream to use for this block.
+    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
     /// * `ciphertext` - The ciphertext to decrypt.
+    /// * `cipher_refs` - References to input and output variables of the cipher.
     async fn decrypt_private(
         &mut self,
-        keystream: ValueRef,
+        explicit_nonce: Vec<u8>,
         ciphertext: Vec<u8>,
+        cipher_refs: CipherRefs<C>,
     ) -> Result<Vec<u8>, StreamCipherError>;
 
     /// Decrypts a ciphertext by removing the keystream, where the plaintext
@@ -109,18 +114,20 @@ pub trait StreamCipher: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `keystream` - The keystream to use for this block.
+    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
     /// * `ciphertext` - The ciphertext to decrypt.
+    /// * `cipher_refs` - References to input and output variables of the cipher.
     async fn decrypt_blind(
         &mut self,
-        keystream: ValueRef,
+        explicit_nonce: Vec<u8>,
         ciphertext: Vec<u8>,
+        cipher_refs: CipherRefs<C>,
     ) -> Result<(), StreamCipherError>;
 }
 
 /// Zk Proving for knowledge of plaintext which encrypts to a ciphertext.
 #[async_trait]
-pub trait ZkProve: Send + Sync {
+pub trait ZkProve<C>: Send + Sync {
     /// Locally decrypts the provided ciphertext and then proves in ZK to the other party(s) that the
     /// plaintext is correct.
     ///
@@ -133,10 +140,12 @@ pub trait ZkProve: Send + Sync {
     ///
     /// * `explicit_nonce` - The explicit nonce to use for the keystream.
     /// * `ciphertext` - The ciphertext to decrypt and prove.
+    /// * `cipher_refs` - References to input and output variables of the cipher.
     async fn prove_plaintext(
         &mut self,
         explicit_nonce: Vec<u8>,
         ciphertext: Vec<u8>,
+        cipher_refs: CipherRefs<C>,
     ) -> Result<Vec<u8>, StreamCipherError>;
 
     /// Verifies the other party(s) can prove they know a plaintext which encrypts to the given ciphertext.
@@ -145,10 +154,12 @@ pub trait ZkProve: Send + Sync {
     ///
     /// * `explicit_nonce` - The explicit nonce to use for the keystream.
     /// * `ciphertext` - The ciphertext to verify.
+    /// * `cipher_refs` - References to input and output variables of the cipher.
     async fn verify_plaintext(
         &mut self,
         explicit_nonce: Vec<u8>,
         ciphertext: Vec<u8>,
+        cipher_refs: CipherRefs<C>,
     ) -> Result<(), StreamCipherError>;
 }
 

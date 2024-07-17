@@ -4,16 +4,16 @@ use std::marker::PhantomData;
 use tracing::instrument;
 use utils::id::NestedId;
 
-pub(crate) struct MpcKeyStream<C, E> {
+pub(crate) struct CipherRefsCreator<C, E> {
     thread: E,
     key: Option<ValueRef>,
     iv: Option<ValueRef>,
     block_counter: NestedId,
-    preprocessed: Option<Calls>,
-    _pd: PhantomData<C>,
+    preprocessed: Option<CipherRefs<C>>,
+    phantom: PhantomData<C>,
 }
 
-impl<C, E> MpcKeyStream<C, E>
+impl<C, E> CipherRefsCreator<C, E>
 where
     C: CtrCircuit,
     E: Thread + Load + Execute + Decode + DecodePrivate + Send + Sync,
@@ -26,7 +26,7 @@ where
             thread,
             block_counter,
             preprocessed: None,
-            _pd: PhantomData,
+            phantom: PhantomData,
         }
     }
     pub fn set_key_and_iv(&mut self, key: ValueRef, iv: ValueRef) {
@@ -37,7 +37,7 @@ where
     #[instrument(level = "debug", skip_all, err)]
     pub async fn preprocess(&mut self, len: usize) -> Result<(), StreamCipherError> {
         let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
-        let calls = self.define_calls(block_count)?;
+        let calls = self.define_cipher_refs(block_count)?;
 
         let inputs = calls.iter_inputs();
         let outputs = calls.iter_outputs();
@@ -62,20 +62,20 @@ where
         explicit_nonce: Vec<u8>,
         start_ctr: usize,
         len: usize,
-    ) -> Result<Calls, StreamCipherError> {
+    ) -> Result<CipherRefs<C>, StreamCipherError> {
         let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
 
         // Take any preprocessed blocks if available, and define new ones if needed.
-        let calls = if let Some(preprocessed) = self.preprocessed.as_mut() {
+        let cipher_refs = if let Some(preprocessed) = self.preprocessed.as_mut() {
             let mut calls = preprocessed.drain(block_count);
-            calls.extend(self.define_calls(block_count - calls.len())?);
+            calls.extend(self.define_cipher_refs(block_count - calls.len())?);
             calls
         } else {
-            self.define_calls(block_count)?
+            self.define_cipher_refs(block_count)?
         };
 
-        calls.assign::<C, E>(&mut self.thread, explicit_nonce, start_ctr)?;
-        Ok(calls)
+        cipher_refs.assign::<E>(&mut self.thread, explicit_nonce, start_ctr)?;
+        Ok(cipher_refs)
     }
 
     fn key(&self) -> Result<ValueRef, StreamCipherError> {
@@ -90,8 +90,8 @@ where
             .ok_or_else(|| StreamCipherError::iv_not_set())
     }
 
-    fn define_calls(&mut self, count: usize) -> Result<Calls, StreamCipherError> {
-        let mut calls = Calls::new(self.key()?, self.iv()?);
+    fn define_cipher_refs(&mut self, count: usize) -> Result<CipherRefs<C>, StreamCipherError> {
+        let mut calls = CipherRefs::new(self.key()?, self.iv()?);
         for _ in 0..count {
             let block_id = self.block_counter.increment_in_place();
             let nonce = self
@@ -110,22 +110,24 @@ where
 }
 
 #[derive(Debug)]
-pub struct Calls {
+pub struct CipherRefs<C> {
     key: ValueRef,
     iv: ValueRef,
     nonces: Vec<ValueRef>,
     ctrs: Vec<ValueRef>,
     blocks: Vec<ValueRef>,
+    phantom: PhantomData<C>,
 }
 
-impl Calls {
+impl<C: CtrCircuit> CipherRefs<C> {
     fn new(key: ValueRef, iv: ValueRef) -> Self {
-        Calls {
+        CipherRefs {
             key,
             iv,
             nonces: Vec::default(),
             ctrs: Vec::default(),
             blocks: Vec::default(),
+            phantom: PhantomData,
         }
     }
 
@@ -137,17 +139,18 @@ impl Calls {
         self.blocks.len()
     }
 
-    fn drain(&mut self, count: usize) -> Calls {
+    fn drain(&mut self, count: usize) -> CipherRefs<C> {
         let nonces = self.nonces.drain(0..count).collect();
         let ctrs = self.ctrs.drain(0..count).collect();
         let blocks = self.blocks.drain(0..count).collect();
 
-        Calls {
+        CipherRefs::<C> {
             key: self.key.clone(),
             iv: self.iv.clone(),
             nonces,
             ctrs,
             blocks,
+            phantom: PhantomData,
         }
     }
 
@@ -157,7 +160,7 @@ impl Calls {
         self.blocks.push(block);
     }
 
-    fn extend(&mut self, vars: Calls) {
+    fn extend(&mut self, vars: CipherRefs<C>) {
         self.nonces.extend(vars.nonces);
         self.ctrs.extend(vars.ctrs);
         self.blocks.extend(vars.blocks);
@@ -175,7 +178,7 @@ impl Calls {
         self.blocks.iter().cloned()
     }
 
-    fn assign<C: CtrCircuit, E: Thread>(
+    fn assign<E: Thread>(
         &self,
         thread: &mut E,
         explicit_nonce: Vec<u8>,

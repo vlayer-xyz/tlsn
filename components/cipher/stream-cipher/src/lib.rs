@@ -22,15 +22,19 @@ mod circuit;
 mod config;
 pub(crate) mod error;
 pub mod keystream;
+mod mode;
 pub mod stream_cipher;
 
 pub use self::cipher::{Aes128Ctr, CtrCircuit};
+use async_trait::async_trait;
 pub use config::{StreamCipherConfig, StreamCipherConfigBuilder, StreamCipherConfigBuilderError};
 pub use error::StreamCipherError;
-use keystream::CipherRefs;
+use keystream::KeyStreamRefs;
+pub use mode::{Blind, Mode, Private, Public, Shared, TextRefs};
+use mpz_circuits::types::Value;
+use mpz_garble::{value::ValueRef, Decode, DecodePrivate, Thread};
 pub use stream_cipher::MpcStreamCipher;
-
-use async_trait::async_trait;
+use utils::id::NestedId;
 
 /// A trait for MPC stream ciphers.
 #[async_trait]
@@ -40,89 +44,26 @@ pub trait StreamCipher<C>: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
-    /// * `plaintext` - The message to apply the keystream to.
-    /// * `cipher_refs` - References to input and output variables of the cipher.
-    async fn encrypt_public(
+    /// * `plaintext` - The plaintext to apply the keystream to.
+    /// * `keystream_refs` - References to input and output variables of the keystream.
+    async fn encrypt<M: Mode + Send>(
         &mut self,
-        explicit_nonce: Vec<u8>,
-        plaintext: Vec<u8>,
-        cipher_refs: CipherRefs<C>,
-    ) -> Result<Vec<u8>, StreamCipherError>;
+        plaintext: TextRefs<M>,
+        keystream: KeyStreamRefs<C>,
+    ) -> Result<M::Output, StreamCipherError>;
 
     /// Applies the keystream to the given plaintext without revealing it
     /// to the other party(s).
     ///
     /// # Arguments
     ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
-    /// * `plaintext` - The message to apply the keystream to.
-    /// * `cipher_refs` - References to input and output variables of the cipher.
-    async fn encrypt_private(
+    /// * `ciphertext` - The ciphertext to apply the keystream to.
+    /// * `keystream_refs` - References to input and output variables of the keystream.
+    async fn decrypt<M: Mode + Send>(
         &mut self,
-        explicit_nonce: Vec<u8>,
-        plaintext: Vec<u8>,
-        cipher_refs: CipherRefs<C>,
+        ciphertext: TextRefs<M>,
+        keystream: KeyStreamRefs<C>,
     ) -> Result<Vec<u8>, StreamCipherError>;
-
-    /// Applies the keystream to a plaintext provided by another party.
-    ///
-    /// # Arguments
-    ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
-    /// * `len` - The length of the plaintext provided by another party.
-    /// * `cipher_refs` - References to input and output variables of the cipher.
-    async fn encrypt_blind(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        len: usize,
-        cipher_refs: CipherRefs<C>,
-    ) -> Result<Vec<u8>, StreamCipherError>;
-
-    /// Decrypts a ciphertext by removing the keystream, where the plaintext
-    /// is revealed to all parties.
-    ///
-    /// # Arguments
-    ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
-    /// * `ciphertext` - The ciphertext to decrypt.
-    /// * `cipher_refs` - References to input and output variables of the cipher.
-    async fn decrypt_public(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        ciphertext: Vec<u8>,
-        cipher_refs: CipherRefs<C>,
-    ) -> Result<Vec<u8>, StreamCipherError>;
-
-    /// Decrypts a ciphertext by removing the keystream, where the plaintext
-    /// is only revealed to this party.
-    ///
-    /// # Arguments
-    ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
-    /// * `ciphertext` - The ciphertext to decrypt.
-    /// * `cipher_refs` - References to input and output variables of the cipher.
-    async fn decrypt_private(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        ciphertext: Vec<u8>,
-        cipher_refs: CipherRefs<C>,
-    ) -> Result<Vec<u8>, StreamCipherError>;
-
-    /// Decrypts a ciphertext by removing the keystream, where the plaintext
-    /// is not revealed to this party.
-    ///
-    /// # Arguments
-    ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
-    /// * `ciphertext` - The ciphertext to decrypt.
-    /// * `cipher_refs` - References to input and output variables of the cipher.
-    async fn decrypt_blind(
-        &mut self,
-        explicit_nonce: Vec<u8>,
-        ciphertext: Vec<u8>,
-        cipher_refs: CipherRefs<C>,
-    ) -> Result<(), StreamCipherError>;
 }
 
 /// Zk Proving for knowledge of plaintext which encrypts to a ciphertext.
@@ -138,29 +79,53 @@ pub trait ZkProve<C>: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
     /// * `ciphertext` - The ciphertext to decrypt and prove.
     /// * `cipher_refs` - References to input and output variables of the cipher.
     async fn prove_plaintext(
         &mut self,
-        explicit_nonce: Vec<u8>,
         ciphertext: Vec<u8>,
-        cipher_refs: CipherRefs<C>,
+        cipher_refs: KeyStreamRefs<C>,
     ) -> Result<Vec<u8>, StreamCipherError>;
 
     /// Verifies the other party(s) can prove they know a plaintext which encrypts to the given ciphertext.
     ///
     /// # Arguments
     ///
-    /// * `explicit_nonce` - The explicit nonce to use for the keystream.
     /// * `ciphertext` - The ciphertext to verify.
     /// * `cipher_refs` - References to input and output variables of the cipher.
     async fn verify_plaintext(
         &mut self,
-        explicit_nonce: Vec<u8>,
         ciphertext: Vec<u8>,
-        cipher_refs: CipherRefs<C>,
+        cipher_refs: KeyStreamRefs<C>,
     ) -> Result<(), StreamCipherError>;
+}
+
+// TODO: This is a temporary location.
+/// A subset of plaintext bytes processed by the stream cipher.
+///
+/// Note that `Transcript` does not store the actual bytes. Instead, it provides IDs which are
+/// assigned to plaintext bytes of the stream cipher.
+pub struct Transcript {
+    /// The ID of this transcript.
+    id: String,
+    /// The ID for the next plaintext byte.
+    plaintext: NestedId,
+}
+
+impl Transcript {
+    pub fn new(id: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            plaintext: NestedId::new(id).append_counter(),
+        }
+    }
+
+    /// Returns unique identifiers for the next plaintext bytes in the transcript.
+    pub fn extend_plaintext(&mut self, len: usize) -> Vec<String> {
+        (0..len)
+            .map(|_| self.plaintext.increment_in_place().to_string())
+            .collect()
+    }
 }
 
 #[cfg(test)]

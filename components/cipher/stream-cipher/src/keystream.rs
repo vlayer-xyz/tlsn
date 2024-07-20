@@ -4,16 +4,16 @@ use std::marker::PhantomData;
 use tracing::instrument;
 use utils::id::NestedId;
 
-pub(crate) struct CipherRefsCreator<C, E> {
+pub struct KeystreamCreator<C, E> {
     thread: E,
     key: Option<ValueRef>,
     iv: Option<ValueRef>,
     block_counter: NestedId,
-    preprocessed: Option<CipherRefs<C>>,
+    preprocessed: Option<KeyStreamRefs<C>>,
     phantom: PhantomData<C>,
 }
 
-impl<C, E> CipherRefsCreator<C, E>
+impl<C, E> KeystreamCreator<C, E>
 where
     C: CtrCircuit,
     E: Thread + Load + Execute + Decode + DecodePrivate + Send + Sync,
@@ -29,6 +29,7 @@ where
             phantom: PhantomData,
         }
     }
+
     pub fn set_key_and_iv(&mut self, key: ValueRef, iv: ValueRef) {
         self.key = Some(key);
         self.iv = Some(iv);
@@ -62,7 +63,7 @@ where
         explicit_nonce: Vec<u8>,
         start_ctr: usize,
         len: usize,
-    ) -> Result<CipherRefs<C>, StreamCipherError> {
+    ) -> Result<KeyStreamRefs<C>, StreamCipherError> {
         let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
 
         // Take any preprocessed blocks if available, and define new ones if needed.
@@ -90,8 +91,8 @@ where
             .ok_or_else(|| StreamCipherError::iv_not_set())
     }
 
-    fn define_cipher_refs(&mut self, count: usize) -> Result<CipherRefs<C>, StreamCipherError> {
-        let mut calls = CipherRefs::new(self.key()?, self.iv()?);
+    fn define_cipher_refs(&mut self, count: usize) -> Result<KeyStreamRefs<C>, StreamCipherError> {
+        let mut calls = KeyStreamRefs::new(self.key()?, self.iv()?);
         for _ in 0..count {
             let block_id = self.block_counter.increment_in_place();
             let nonce = self
@@ -110,7 +111,7 @@ where
 }
 
 #[derive(Debug)]
-pub struct CipherRefs<C> {
+pub struct KeyStreamRefs<C> {
     key: ValueRef,
     iv: ValueRef,
     nonces: Vec<ValueRef>,
@@ -119,9 +120,9 @@ pub struct CipherRefs<C> {
     phantom: PhantomData<C>,
 }
 
-impl<C: CtrCircuit> CipherRefs<C> {
+impl<C: CtrCircuit> KeyStreamRefs<C> {
     fn new(key: ValueRef, iv: ValueRef) -> Self {
-        CipherRefs {
+        KeyStreamRefs {
             key,
             iv,
             nonces: Vec::default(),
@@ -135,16 +136,16 @@ impl<C: CtrCircuit> CipherRefs<C> {
         self.blocks.is_empty()
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.blocks.len()
     }
 
-    fn drain(&mut self, count: usize) -> CipherRefs<C> {
+    fn drain(&mut self, count: usize) -> KeyStreamRefs<C> {
         let nonces = self.nonces.drain(0..count).collect();
         let ctrs = self.ctrs.drain(0..count).collect();
         let blocks = self.blocks.drain(0..count).collect();
 
-        CipherRefs::<C> {
+        KeyStreamRefs::<C> {
             key: self.key.clone(),
             iv: self.iv.clone(),
             nonces,
@@ -160,13 +161,13 @@ impl<C: CtrCircuit> CipherRefs<C> {
         self.blocks.push(block);
     }
 
-    fn extend(&mut self, vars: CipherRefs<C>) {
+    fn extend(&mut self, vars: KeyStreamRefs<C>) {
         self.nonces.extend(vars.nonces);
         self.ctrs.extend(vars.ctrs);
         self.blocks.extend(vars.blocks);
     }
 
-    fn iter_inputs<'a>(&'a self) -> impl Iterator<Item = [ValueRef; 4]> + 'a {
+    pub fn iter_inputs<'a>(&'a self) -> impl Iterator<Item = [ValueRef; 4]> + 'a {
         self.nonces
             .iter()
             .cloned()
@@ -174,11 +175,11 @@ impl<C: CtrCircuit> CipherRefs<C> {
             .map(|(nonce, ctr)| [self.key.clone(), self.iv.clone(), nonce, ctr])
     }
 
-    fn iter_outputs(&self) -> impl Iterator<Item = ValueRef> + '_ {
+    pub fn iter_outputs(&self) -> impl Iterator<Item = ValueRef> + '_ {
         self.blocks.iter().cloned()
     }
 
-    fn assign<E: Thread>(
+    pub fn assign<E: Thread>(
         &self,
         thread: &mut E,
         explicit_nonce: Vec<u8>,
@@ -196,7 +197,7 @@ impl<C: CtrCircuit> CipherRefs<C> {
         Ok(())
     }
 
-    fn take_blocks(&self, len: usize) -> Vec<ValueRef> {
+    pub fn take_blocks(&self, len: usize) -> Vec<ValueRef> {
         self.blocks
             .iter()
             .flat_map(|block| block.iter())

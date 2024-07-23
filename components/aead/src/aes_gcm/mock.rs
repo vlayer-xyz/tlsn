@@ -1,14 +1,12 @@
 //! Mock implementation of AES-GCM for testing purposes.
 
+use super::*;
 use block_cipher::{BlockCipherConfig, MpcBlockCipher};
 use mpz_common::executor::{test_st_executor, STExecutor};
 use mpz_garble::protocol::deap::mock::{MockFollower, MockLeader};
 use mpz_ot::ideal::ot::ideal_ot;
 use serio::channel::MemoryDuplex;
-use tlsn_stream_cipher::{MpcStreamCipher, StreamCipherConfig};
 use tlsn_universal_hash::ghash::ideal_ghash;
-
-use super::*;
 
 /// Creates a mock AES-GCM pair.
 ///
@@ -56,22 +54,6 @@ pub async fn create_mock_aes_gcm_pair(
         block_follower,
     );
 
-    let stream_cipher_id = format!("{}/stream_cipher", id);
-    let leader_stream_cipher = MpcStreamCipher::new(
-        StreamCipherConfig::builder()
-            .id(stream_cipher_id.clone())
-            .build()
-            .unwrap(),
-        leader,
-    );
-    let follower_stream_cipher = MpcStreamCipher::new(
-        StreamCipherConfig::builder()
-            .id(stream_cipher_id.clone())
-            .build()
-            .unwrap(),
-        follower,
-    );
-
     let (ctx_a, ctx_b) = test_st_executor(128);
     let (leader_ghash, follower_ghash) = ideal_ghash(ctx_a, ctx_b);
 
@@ -80,7 +62,6 @@ pub async fn create_mock_aes_gcm_pair(
         leader_config,
         ctx_a,
         Box::new(leader_block_cipher),
-        Box::new(leader_stream_cipher),
         Box::new(leader_ghash),
     );
 
@@ -88,7 +69,6 @@ pub async fn create_mock_aes_gcm_pair(
         follower_config,
         ctx_b,
         Box::new(follower_block_cipher),
-        Box::new(follower_stream_cipher),
         Box::new(follower_ghash),
     );
 

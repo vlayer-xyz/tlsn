@@ -1,5 +1,5 @@
 [workspace]
-members = ["stream-cipher", "block-cipher"]
+members = ["block-cipher"]
 resolver = "2"
 
 [workspace.dependencies]

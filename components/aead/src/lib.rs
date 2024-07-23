@@ -13,27 +13,13 @@
 #![forbid(unsafe_code)]
 
 pub mod aes_gcm;
+mod error;
+pub mod keystream;
+pub use error::AesGcmError;
 
 use async_trait::async_trait;
+use keystream::KeyStreamRefs;
 use mpz_garble::value::ValueRef;
-
-/// An error that can occur during AEAD operations.
-#[derive(Debug, thiserror::Error)]
-#[allow(missing_docs)]
-pub enum AeadError {
-    #[error(transparent)]
-    BlockCipherError(#[from] block_cipher::BlockCipherError),
-    #[error(transparent)]
-    StreamCipherError(#[from] tlsn_stream_cipher::StreamCipherError),
-    #[error(transparent)]
-    UniversalHashError(#[from] tlsn_universal_hash::UniversalHashError),
-    #[error("Corrupted Tag")]
-    CorruptedTag,
-    #[error("Validation Error: {0}")]
-    ValidationError(String),
-    #[error(transparent)]
-    IoError(#[from] std::io::Error),
-}
 
 /// This trait defines the interface for AEADs.
 #[async_trait]
@@ -42,39 +28,16 @@ pub trait Aead: Send {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Sets the key for the AEAD.
-    async fn set_key(&mut self, key: ValueRef, iv: ValueRef) -> Result<(), Self::Error>;
+    async fn set_key(&mut self, key: ValueRef) -> Result<(), Self::Error>;
 
-    /// Decodes the key for the AEAD, revealing it to this party.
-    async fn decode_key_private(&mut self) -> Result<(), Self::Error>;
-
-    /// Decodes the key for the AEAD, revealing it to the other party(s).
-    async fn decode_key_blind(&mut self) -> Result<(), Self::Error>;
-
-    /// Sets the transcript id.
-    ///
-    /// The AEAD assigns unique identifiers to each byte of plaintext
-    /// during encryption and decryption.
-    ///
-    /// For example, if the transcript id is set to `foo`, then the first byte will
-    /// be assigned the id `foo/0`, the second byte `foo/1`, and so on.
-    ///
-    /// Each transcript id has an independent counter.
-    ///
-    /// # Note
-    ///
-    /// The state of a transcript counter is preserved between calls to `set_transcript_id`.
-    fn set_transcript_id(&mut self, id: &str);
+    /// Sets the iv for the AEAD.
+    async fn set_iv(&mut self, iv: ValueRef) -> Result<(), Self::Error>;
 
     /// Performs any necessary one-time setup for the AEAD.
     async fn setup(&mut self) -> Result<(), Self::Error>;
 
     /// Preprocesses for the given number of bytes.
     async fn preprocess(&mut self, len: usize) -> Result<(), Self::Error>;
-
-    /// Starts the AEAD.
-    ///
-    /// This method performs initialization for the AEAD after setting the key.
-    async fn start(&mut self) -> Result<(), Self::Error>;
 
     /// Encrypts a plaintext message, returning the ciphertext and tag.
     ///
@@ -255,5 +218,40 @@ pub trait Aead: Send {
         &mut self,
         explicit_nonce: Vec<u8>,
         ciphertext: Vec<u8>,
+    ) -> Result<(), Self::Error>;
+}
+
+/// Zk Proving for knowledge of plaintext which encrypts to a ciphertext.
+#[async_trait]
+pub trait ZkProve<C>: Send + Sync {
+    type Error: std::error::Error + Send + Sync + 'static;
+    /// Locally decrypts the provided ciphertext and then proves in ZK to the other party(s) that the
+    /// plaintext is correct.
+    ///
+    /// Returns the plaintext.
+    ///
+    /// This method requires this party to know the encryption key, which can be achieved by calling
+    /// the `decode_key_private` method.
+    ///
+    /// # Arguments
+    ///
+    /// * `ciphertext` - The ciphertext to decrypt and prove.
+    /// * `cipher_refs` - References to input and output variables of the cipher.
+    async fn prove_plaintext(
+        &mut self,
+        ciphertext: Vec<u8>,
+        cipher_refs: KeyStreamRefs,
+    ) -> Result<Vec<u8>, Self::Error>;
+
+    /// Verifies the other party(s) can prove they know a plaintext which encrypts to the given ciphertext.
+    ///
+    /// # Arguments
+    ///
+    /// * `ciphertext` - The ciphertext to verify.
+    /// * `cipher_refs` - References to input and output variables of the cipher.
+    async fn verify_plaintext(
+        &mut self,
+        ciphertext: Vec<u8>,
+        cipher_refs: KeyStreamRefs,
     ) -> Result<(), Self::Error>;
 }

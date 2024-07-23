@@ -22,48 +22,28 @@ mod circuit;
 mod config;
 pub(crate) mod error;
 pub mod keystream;
-mod mode;
-pub mod stream_cipher;
 
 pub use self::cipher::{Aes128Ctr, CtrCircuit};
 use async_trait::async_trait;
 pub use config::{StreamCipherConfig, StreamCipherConfigBuilder, StreamCipherConfigBuilderError};
 pub use error::StreamCipherError;
 use keystream::KeyStreamRefs;
-pub use mode::{Blind, Mode, Private, Public, Shared, TextRefs};
 use mpz_circuits::types::Value;
 use mpz_garble::{value::ValueRef, Decode, DecodePrivate, Thread};
-pub use stream_cipher::MpcStreamCipher;
 use utils::id::NestedId;
 
 /// A trait for MPC stream ciphers.
 #[async_trait]
-pub trait StreamCipher<C>: Send + Sync {
-    /// Applies the keystream to the given plaintext, where all parties
-    /// provide the plaintext as an input.
-    ///
-    /// # Arguments
-    ///
-    /// * `plaintext` - The plaintext to apply the keystream to.
-    /// * `keystream_refs` - References to input and output variables of the keystream.
-    async fn encrypt<M: Mode + Send>(
+pub trait Keystream<C>: Send + Sync + 'static {
+    fn set_key(&mut self, key: ValueRef) -> Result<(), StreamCipherError>;
+    fn set_iv(&mut self, iv: ValueRef) -> Result<(), StreamCipherError>;
+    async fn preprocess(&mut self, len: usize) -> Result<(), StreamCipherError>;
+    async fn compute_keystream(
         &mut self,
-        plaintext: TextRefs<M>,
-        keystream: KeyStreamRefs<C>,
-    ) -> Result<M::Output, StreamCipherError>;
-
-    /// Applies the keystream to the given plaintext without revealing it
-    /// to the other party(s).
-    ///
-    /// # Arguments
-    ///
-    /// * `ciphertext` - The ciphertext to apply the keystream to.
-    /// * `keystream_refs` - References to input and output variables of the keystream.
-    async fn decrypt<M: Mode + Send>(
-        &mut self,
-        ciphertext: TextRefs<M>,
-        keystream: KeyStreamRefs<C>,
-    ) -> Result<Vec<u8>, StreamCipherError>;
+        explicit_nonce: Vec<u8>,
+        start_ctr: usize,
+        len: usize,
+    ) -> Result<KeyStreamRefs<C>, StreamCipherError>;
 }
 
 /// Zk Proving for knowledge of plaintext which encrypts to a ciphertext.

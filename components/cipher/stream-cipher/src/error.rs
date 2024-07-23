@@ -65,15 +65,6 @@ impl StreamCipherError {
             source: Some(format!("iv not set").into()),
         }
     }
-
-    pub(crate) fn unequal_block_len(len_first: usize, len_second: usize) -> Self {
-        Self {
-            kind: ErrorKind::UnequalBlock,
-            source: Some(
-                format!("Unequal block length, got {} and {}", len_first, len_second).into(),
-            ),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -82,7 +73,6 @@ pub(crate) enum ErrorKind {
     Key,
     Iv,
     ExplicitNonce,
-    UnequalBlock,
 }
 
 impl fmt::Display for StreamCipherError {
@@ -92,7 +82,6 @@ impl fmt::Display for StreamCipherError {
             ErrorKind::Key => write!(f, "key error")?,
             ErrorKind::Iv => write!(f, "iv error")?,
             ErrorKind::ExplicitNonce => write!(f, "explicit nonce error")?,
-            ErrorKind::UnequalBlock => write!(f, "unequal block error")?,
         }
 
         if let Some(ref source) = self.source {

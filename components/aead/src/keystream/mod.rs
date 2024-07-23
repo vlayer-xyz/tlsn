@@ -1,51 +1,53 @@
-use crate::{CtrCircuit, StreamCipherError};
-use mpz_garble::{value::ValueRef, Decode, DecodePrivate, Execute, Load, Thread};
-use std::marker::PhantomData;
+pub mod cipher;
+pub mod circuit;
+pub mod config;
+
+use crate::error::AesGcmError;
+use cipher::CtrCircuit;
+use mpz_garble::{value::ValueRef, Load, Thread};
 use tracing::instrument;
 use utils::id::NestedId;
 
-pub struct KeystreamCreator<C, E> {
-    thread: E,
+#[derive(Debug)]
+pub struct KeystreamCreator {
     key: Option<ValueRef>,
     iv: Option<ValueRef>,
     block_counter: NestedId,
-    preprocessed: Option<KeyStreamRefs<C>>,
-    phantom: PhantomData<C>,
+    preprocessed: Option<KeyStreamRefs>,
 }
 
-impl<C, E> KeystreamCreator<C, E>
-where
-    C: CtrCircuit,
-    E: Thread + Load + Execute + Decode + DecodePrivate + Send + Sync,
-{
-    pub fn new(id: &str, thread: E) -> Self {
+impl KeystreamCreator {
+    pub fn new(id: &str) -> Self {
         let block_counter = NestedId::new(id).append_counter();
         Self {
             key: None,
             iv: None,
-            thread,
             block_counter,
             preprocessed: None,
-            phantom: PhantomData,
         }
     }
 
-    pub fn set_key_and_iv(&mut self, key: ValueRef, iv: ValueRef) {
+    pub fn set_key(&mut self, key: ValueRef) {
         self.key = Some(key);
+    }
+
+    pub fn set_iv(&mut self, iv: ValueRef) {
         self.iv = Some(iv);
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    pub async fn preprocess(&mut self, len: usize) -> Result<(), StreamCipherError> {
+    pub async fn preprocess<C, T>(&mut self, thread: &mut T, len: usize) -> Result<(), AesGcmError>
+    where
+        C: CtrCircuit,
+        T: Thread + Load,
+    {
         let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
-        let calls = self.define_cipher_refs(block_count)?;
+        let calls = self.define_cipher_refs::<C, T>(block_count)?;
 
         let inputs = calls.iter_inputs();
         let outputs = calls.iter_outputs();
         for (input, output) in inputs.zip(outputs) {
-            self.thread
-                .load(C::circuit(), input.as_ref(), &[output])
-                .await?;
+            thread.load(C::circuit(), input.as_ref(), &[output]).await?;
         }
 
         if let Some(preprocessed) = self.preprocessed.as_mut() {
@@ -58,40 +60,45 @@ where
     }
 
     #[instrument(level = "debug", skip_all, err)]
-    pub async fn compute_keystream(
+    pub async fn compute_keystream<C, T>(
         &mut self,
+        thread: &mut T,
         explicit_nonce: Vec<u8>,
         start_ctr: usize,
         len: usize,
-    ) -> Result<KeyStreamRefs<C>, StreamCipherError> {
+    ) -> Result<KeyStreamRefs, AesGcmError>
+    where
+        C: CtrCircuit,
+        T: Thread + Load,
+    {
         let block_count = (len / C::BLOCK_LEN) + (len % C::BLOCK_LEN != 0) as usize;
 
         // Take any preprocessed blocks if available, and define new ones if needed.
         let cipher_refs = if let Some(preprocessed) = self.preprocessed.as_mut() {
             let mut calls = preprocessed.drain(block_count);
-            calls.extend(self.define_cipher_refs(block_count - calls.len())?);
+            calls.extend(self.define_cipher_refs::<C, T>(block_count - calls.len())?);
             calls
         } else {
-            self.define_cipher_refs(block_count)?
+            self.define_cipher_refs::<C, T>(block_count)?
         };
 
-        cipher_refs.assign::<E>(&mut self.thread, explicit_nonce, start_ctr)?;
+        cipher_refs.assign::<C, T>(thread, explicit_nonce, start_ctr)?;
         Ok(cipher_refs)
     }
 
-    fn key(&self) -> Result<ValueRef, StreamCipherError> {
-        self.key
-            .clone()
-            .ok_or_else(|| StreamCipherError::key_not_set())
+    fn key(&self) -> Result<ValueRef, AesGcmError> {
+        self.key.clone().ok_or_else(AesGcmError::key_not_set)
     }
 
-    fn iv(&self) -> Result<ValueRef, StreamCipherError> {
-        self.iv
-            .clone()
-            .ok_or_else(|| StreamCipherError::iv_not_set())
+    fn iv(&self) -> Result<ValueRef, AesGcmError> {
+        self.iv.clone().ok_or_else(AesGcmError::iv_not_set)
     }
 
-    fn define_cipher_refs(&mut self, count: usize) -> Result<KeyStreamRefs<C>, StreamCipherError> {
+    fn define_cipher_refs<C, T>(&mut self, count: usize) -> Result<KeyStreamRefs, AesGcmError>
+    where
+        C: CtrCircuit,
+        T: Load + Thread,
+    {
         let mut calls = KeyStreamRefs::new(self.key()?, self.iv()?);
         for _ in 0..count {
             let block_id = self.block_counter.increment_in_place();
@@ -111,16 +118,15 @@ where
 }
 
 #[derive(Debug)]
-pub struct KeyStreamRefs<C> {
+pub struct KeyStreamRefs {
     key: ValueRef,
     iv: ValueRef,
     nonces: Vec<ValueRef>,
     ctrs: Vec<ValueRef>,
     blocks: Vec<ValueRef>,
-    phantom: PhantomData<C>,
 }
 
-impl<C: CtrCircuit> KeyStreamRefs<C> {
+impl KeyStreamRefs {
     fn new(key: ValueRef, iv: ValueRef) -> Self {
         KeyStreamRefs {
             key,
@@ -128,7 +134,6 @@ impl<C: CtrCircuit> KeyStreamRefs<C> {
             nonces: Vec::default(),
             ctrs: Vec::default(),
             blocks: Vec::default(),
-            phantom: PhantomData,
         }
     }
 
@@ -140,7 +145,7 @@ impl<C: CtrCircuit> KeyStreamRefs<C> {
         self.blocks.len()
     }
 
-    fn drain(&mut self, mut count: usize) -> KeyStreamRefs<C> {
+    fn drain(&mut self, mut count: usize) -> KeyStreamRefs {
         if count > self.len() {
             count = self.len();
         }
@@ -149,13 +154,12 @@ impl<C: CtrCircuit> KeyStreamRefs<C> {
         let ctrs = self.ctrs.drain(0..count).collect();
         let blocks = self.blocks.drain(0..count).collect();
 
-        KeyStreamRefs::<C> {
+        KeyStreamRefs {
             key: self.key.clone(),
             iv: self.iv.clone(),
             nonces,
             ctrs,
             blocks,
-            phantom: PhantomData,
         }
     }
 
@@ -165,7 +169,7 @@ impl<C: CtrCircuit> KeyStreamRefs<C> {
         self.blocks.push(block);
     }
 
-    fn extend(&mut self, vars: KeyStreamRefs<C>) {
+    fn extend(&mut self, vars: KeyStreamRefs) {
         self.nonces.extend(vars.nonces);
         self.ctrs.extend(vars.ctrs);
         self.blocks.extend(vars.blocks);
@@ -183,16 +187,20 @@ impl<C: CtrCircuit> KeyStreamRefs<C> {
         self.blocks.iter().cloned()
     }
 
-    pub fn assign<E: Thread>(
+    pub fn assign<C, T>(
         &self,
-        thread: &mut E,
+        thread: &mut T,
         explicit_nonce: Vec<u8>,
         start_ctr: usize,
-    ) -> Result<(), StreamCipherError> {
+    ) -> Result<(), AesGcmError>
+    where
+        C: CtrCircuit,
+        T: Load + Thread,
+    {
         let explicit_nonce_len = explicit_nonce.len();
         let explicit_nonce: C::NONCE = explicit_nonce
             .try_into()
-            .map_err(|_| StreamCipherError::explicit_nonce_len::<C>(explicit_nonce_len))?;
+            .map_err(|_| AesGcmError::explicit_nonce_len::<C>(explicit_nonce_len))?;
 
         for (k, [_, _, nonce, ctr]) in self.iter_inputs().enumerate() {
             thread.assign(&nonce, explicit_nonce)?;
@@ -209,5 +217,13 @@ impl<C: CtrCircuit> KeyStreamRefs<C> {
             .take(len)
             .map(|byte| ValueRef::Value { id: byte })
             .collect()
+    }
+
+    pub async fn compute<C, T>(self) -> Result<ValueRef, AesGcmError>
+    where
+        C: CtrCircuit,
+        T: Load + Thread,
+    {
+        todo!()
     }
 }

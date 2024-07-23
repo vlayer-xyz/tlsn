@@ -1,25 +1,24 @@
 //! This module provides an implementation of 2PC AES-GCM.
 
 mod config;
-mod error;
 #[cfg(feature = "mock")]
 pub mod mock;
 mod tag;
 
 pub use config::{AesGcmConfig, AesGcmConfigBuilder, AesGcmConfigBuilderError, Role};
-pub use error::AesGcmError;
 
+use crate::error::AesGcmError;
 use async_trait::async_trait;
 use block_cipher::{Aes128, BlockCipher};
 use futures::TryFutureExt;
 use mpz_common::Context;
 use mpz_garble::value::ValueRef;
-use tlsn_stream_cipher::{Aes128Ctr, StreamCipher};
 use tlsn_universal_hash::UniversalHash;
 use tracing::instrument;
 
 use crate::{
     aes_gcm::tag::{compute_tag, verify_tag, TAG_LEN},
+    keystream::KeystreamCreator,
     Aead,
 };
 
@@ -27,8 +26,8 @@ use crate::{
 pub struct MpcAesGcm<Ctx> {
     config: AesGcmConfig,
     ctx: Ctx,
+    keystream: KeystreamCreator,
     aes_block: Box<dyn BlockCipher<Aes128>>,
-    aes_ctr: Box<dyn StreamCipher<Aes128Ctr>>,
     ghash: Box<dyn UniversalHash>,
 }
 
@@ -46,14 +45,15 @@ impl<Ctx: Context> MpcAesGcm<Ctx> {
         config: AesGcmConfig,
         context: Ctx,
         aes_block: Box<dyn BlockCipher<Aes128>>,
-        aes_ctr: Box<dyn StreamCipher<Aes128Ctr>>,
+
         ghash: Box<dyn UniversalHash>,
     ) -> Self {
+        let keystream = KeystreamCreator::new("");
         Self {
             config,
             ctx: context,
             aes_block,
-            aes_ctr,
+            keystream,
             ghash,
         }
     }
@@ -66,7 +66,8 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
     #[instrument(level = "info", skip_all, err)]
     async fn set_key(&mut self, key: ValueRef, iv: ValueRef) -> Result<(), AesGcmError> {
         self.aes_block.set_key(key.clone());
-        self.aes_ctr.set_key(key);
+        self.keystream.set_key(key);
+        self.keystream.set_iv(iv);
 
         Ok(())
     }
@@ -424,6 +425,7 @@ impl<Ctx: Context> Aead for MpcAesGcm<Ctx> {
 mod tests {
     use super::*;
 
+    use crate::error::ErrorKind;
     use crate::{
         aes_gcm::{mock::create_mock_aes_gcm_pair, AesGcmConfigBuilder, Role},
         Aead,
@@ -432,7 +434,6 @@ mod tests {
         aead::{AeadInPlace, KeyInit},
         Aes128Gcm, Nonce,
     };
-    use error::ErrorKind;
     use mpz_common::executor::STExecutor;
     use mpz_garble::{protocol::deap::mock::create_mock_deap_vm, Memory};
     use serio::channel::MemoryDuplex;

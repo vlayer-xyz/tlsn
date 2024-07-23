@@ -1,4 +1,4 @@
-use futures::TryFutureExt;
+use crate::aes_gcm::{AesGcmError, Role};
 use mpz_common::Context;
 use mpz_core::{
     commit::{Decommitment, HashCommit},
@@ -7,11 +7,8 @@ use mpz_core::{
 use serde::{Deserialize, Serialize};
 use serio::{stream::IoStreamExt, SinkExt};
 use std::ops::Add;
-use tlsn_stream_cipher::{Aes128Ctr, StreamCipher};
 use tlsn_universal_hash::UniversalHash;
 use tracing::instrument;
-
-use crate::aes_gcm::{AesGcmError, Role};
 
 pub(crate) const TAG_LEN: usize = 16;
 
@@ -33,21 +30,13 @@ impl Add for TagShare {
 }
 
 #[instrument(level = "trace", skip_all, err)]
-async fn compute_tag_share<C: StreamCipher<Aes128Ctr> + ?Sized, H: UniversalHash + ?Sized>(
-    aes_ctr: &mut C,
+async fn compute_tag_share<H: UniversalHash + ?Sized>(
+    j0: Vec<u8>,
     hasher: &mut H,
-    explicit_nonce: Vec<u8>,
     ciphertext: Vec<u8>,
     aad: Vec<u8>,
 ) -> Result<TagShare, AesGcmError> {
-    let (j0, hash) = futures::try_join!(
-        aes_ctr
-            .share_keystream_block(explicit_nonce, 1)
-            .map_err(AesGcmError::from),
-        hasher
-            .finalize(build_ghash_data(aad, ciphertext))
-            .map_err(AesGcmError::from)
-    )?;
+    let hash = hasher.finalize(build_ghash_data(aad, ciphertext)).await?;
 
     debug_assert!(j0.len() == TAG_LEN);
     debug_assert!(hash.len() == TAG_LEN);
@@ -62,19 +51,14 @@ async fn compute_tag_share<C: StreamCipher<Aes128Ctr> + ?Sized, H: UniversalHash
 /// The commit-reveal step is not required for computing a tag sent to the Server, as it
 /// will be able to detect if the tag is incorrect.
 #[instrument(level = "debug", skip_all, err)]
-pub(crate) async fn compute_tag<
-    Ctx: Context,
-    C: StreamCipher<Aes128Ctr> + ?Sized,
-    H: UniversalHash + ?Sized,
->(
+pub(crate) async fn compute_tag<Ctx: Context, H: UniversalHash + ?Sized>(
+    j0: Vec<u8>,
     ctx: &mut Ctx,
-    aes_ctr: &mut C,
     hasher: &mut H,
-    explicit_nonce: Vec<u8>,
     ciphertext: Vec<u8>,
     aad: Vec<u8>,
 ) -> Result<[u8; TAG_LEN], AesGcmError> {
-    let tag_share = compute_tag_share(aes_ctr, hasher, explicit_nonce, ciphertext, aad).await?;
+    let tag_share = compute_tag_share(j0, hasher, ciphertext, aad).await?;
 
     // TODO: The follower doesn't really need to learn the tag,
     // we could reduce some latency by not sending it.
@@ -93,21 +77,16 @@ pub(crate) async fn compute_tag<
 /// Without it, the party which receives the other's tag share first could trivially compute
 /// a tag share which would cause an invalid message to be accepted.
 #[instrument(level = "debug", skip_all, err)]
-pub(crate) async fn verify_tag<
-    Ctx: Context,
-    C: StreamCipher<Aes128Ctr> + ?Sized,
-    H: UniversalHash + ?Sized,
->(
+pub(crate) async fn verify_tag<Ctx: Context, H: UniversalHash + ?Sized>(
+    j0: Vec<u8>,
     ctx: &mut Ctx,
-    aes_ctr: &mut C,
     hasher: &mut H,
     role: Role,
-    explicit_nonce: Vec<u8>,
     ciphertext: Vec<u8>,
     aad: Vec<u8>,
     purported_tag: [u8; TAG_LEN],
 ) -> Result<(), AesGcmError> {
-    let tag_share = compute_tag_share(aes_ctr, hasher, explicit_nonce, ciphertext, aad).await?;
+    let tag_share = compute_tag_share(j0, hasher, ciphertext, aad).await?;
 
     let io = ctx.io_mut();
     let tag = match role {

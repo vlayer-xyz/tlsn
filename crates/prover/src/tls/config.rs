@@ -40,8 +40,8 @@ impl ProverConfig {
         &self.id
     }
 
-    /// Returns the maximum number of bytes that can be sent online.
-    pub fn max_sent_data_online(&self) -> usize {
+    /// Returns the maximum number of bytes that can be sent.
+    pub fn max_sent_data(&self) -> usize {
         self.max_sent_data
     }
 

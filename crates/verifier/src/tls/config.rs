@@ -36,7 +36,7 @@ impl Debug for VerifierConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("VerifierConfig")
             .field("id", &self.id)
-            .field("max_sent_data_online", &self.max_sent_data)
+            .field("max_sent_data", &self.max_sent_data)
             .field("max_recv_data_online", &self.max_recv_data_online)
             .field("max_deferred_size", &self.max_deferred_size)
             .field("cert_verifier", &"_")
@@ -55,8 +55,8 @@ impl VerifierConfig {
         &self.id
     }
 
-    /// Returns the maximum number of bytes that can be sent online.
-    pub fn max_sent_data_online(&self) -> usize {
+    /// Returns the maximum number of bytes that can be sent.
+    pub fn max_sent_data(&self) -> usize {
         self.max_sent_data
     }
 

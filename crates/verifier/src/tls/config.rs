@@ -18,7 +18,7 @@ pub struct VerifierConfig {
     /// Maximum number of bytes that can be sent.
     #[builder(default = "DEFAULT_MAX_SENT_LIMIT")]
     max_sent_data: usize,
-    /// Maximum number of bytes that can be received online.
+    /// Maximum number of bytes that can be decrypted online.
     #[builder(default = "DEFAULT_MAX_RECV_LIMIT")]
     max_recv_data_online: usize,
     /// Maximum number of bytes that will be decrypted after the TLS connection is closed.
@@ -60,7 +60,7 @@ impl VerifierConfig {
         self.max_sent_data
     }
 
-    /// Returns the maximum number of bytes that can be received online.
+    /// Returns the maximum number of bytes that can be decrypted online.
     pub fn max_recv_data_online(&self) -> usize {
         self.max_recv_data_online
     }

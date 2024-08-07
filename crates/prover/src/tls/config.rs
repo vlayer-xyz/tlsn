@@ -112,7 +112,8 @@ impl ProverConfig {
         ot_send_estimate(
             Role::Prover,
             self.max_sent_data,
-            self.max_recv_data_online + self.max_deferred_size,
+            self.max_recv_data_online,
+            self.max_deferred_size,
         )
     }
 
@@ -120,7 +121,8 @@ impl ProverConfig {
         ot_recv_estimate(
             Role::Prover,
             self.max_sent_data,
-            self.max_recv_data_online + self.max_deferred_size,
+            self.max_recv_data_online,
+            self.max_deferred_size,
         )
     }
 }

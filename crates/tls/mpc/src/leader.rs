@@ -101,6 +101,7 @@ impl MpcTlsLeader {
             config.common().rx_config().id().to_string(),
             config.common().rx_config().opaque_id().to_string(),
         );
+        let is_decrypting = !config.defer_decryption_from_start();
 
         Self {
             config,
@@ -111,7 +112,7 @@ impl MpcTlsLeader {
             encrypter,
             decrypter,
             notifier: BackendNotifier::new(),
-            is_decrypting: true,
+            is_decrypting,
             buffer: VecDeque::new(),
             committed: false,
         }
@@ -134,11 +135,13 @@ impl MpcTlsLeader {
         self.ke.preprocess().await?;
         self.prf.preprocess().await?;
 
+        let preprocess_encrypt = self.config.common().tx_config().max_online_size();
+        let preprocess_decrypt = self.config.common().rx_config().max_online_size()
+            + self.config.common().rx_config().max_deferred_size();
+
         futures::try_join!(
-            self.encrypter
-                .preprocess(self.config.common().tx_config().max_online_size()),
-            self.decrypter
-                .preprocess(self.config.common().rx_config().max_online_size()),
+            self.encrypter.preprocess(preprocess_encrypt),
+            self.decrypter.preprocess(preprocess_decrypt),
         )?;
 
         self.prf

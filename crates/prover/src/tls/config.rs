@@ -22,11 +22,21 @@ pub struct ProverConfig {
     #[builder(default = "DEFAULT_MAX_SENT_LIMIT")]
     max_sent_data: usize,
     /// Maximum number of bytes that can be decrypted online.
-    #[builder(default = "DEFAULT_MAX_RECV_LIMIT")]
+    #[builder(default = "0")]
     max_recv_data_online: usize,
     /// Maximum number of bytes that will be decrypted after the TLS connection is closed.
-    #[builder(default = "0")]
+    #[builder(default = "DEFAULT_MAX_RECV_LIMIT")]
     max_deferred_size: usize,
+    /// Defers the decryption from the start of the connection.
+    ///
+    /// Decryption of responses will be deferred until after the TLS connection is closed. This is
+    /// useful if you either have only one request/response cycle of if you have several such
+    /// cycles but the content of the request never depends on the content of the previous response.
+    ///
+    /// This allows to decrypt responses locally without MPC, so this option saves bandwidth
+    /// and performance.
+    #[builder(default = "true")]
+    defer_decryption_from_start: bool,
 }
 
 impl ProverConfig {
@@ -60,6 +70,11 @@ impl ProverConfig {
         &self.server_dns
     }
 
+    /// Returns if deferred decryption is used from the start of the connection.
+    pub fn defer_decryption_from_start(&self) -> bool {
+        self.defer_decryption_from_start
+    }
+
     pub(crate) fn build_mpc_tls_config(&self) -> MpcTlsLeaderConfig {
         MpcTlsLeaderConfig::builder()
             .common(
@@ -82,6 +97,7 @@ impl ProverConfig {
                     .build()
                     .unwrap(),
             )
+            .defer_decryption_from_start(self.defer_decryption_from_start)
             .build()
             .unwrap()
     }

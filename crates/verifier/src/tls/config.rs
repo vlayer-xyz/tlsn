@@ -19,10 +19,10 @@ pub struct VerifierConfig {
     #[builder(default = "DEFAULT_MAX_SENT_LIMIT")]
     max_sent_data: usize,
     /// Maximum number of bytes that can be decrypted online.
-    #[builder(default = "DEFAULT_MAX_RECV_LIMIT")]
+    #[builder(default = "0")]
     max_recv_data_online: usize,
     /// Maximum number of bytes that will be decrypted after the TLS connection is closed.
-    #[builder(default = "0")]
+    #[builder(default = "DEFAULT_MAX_RECV_LIMIT")]
     max_deferred_size: usize,
     #[builder(
         pattern = "owned",

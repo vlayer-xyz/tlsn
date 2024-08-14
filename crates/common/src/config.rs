@@ -28,8 +28,8 @@ pub fn ot_send_estimate(
         Role::Verifier => {
             EXTRA_OTS
                 + (max_sent_data * OTS_PER_BYTE_SENT)
-                + (max_recv_data * OTS_PER_BYTE_RECV_ONLINE
-                    + (max_defer_data * OTS_PER_BYTE_RECV_DEFER))
+                + (max_recv_data * OTS_PER_BYTE_RECV_ONLINE)
+                + (max_defer_data * OTS_PER_BYTE_RECV_DEFER)
         }
     }
 }

@@ -173,8 +173,6 @@ async fn leader(config: MpcTlsCommonConfig, mux: TestFramedMux) {
 
     println!("{}", String::from_utf8_lossy(&buf));
 
-    leader_ctrl.defer_decryption().await.unwrap();
-
     let msg = concat!(
         "POST /echo HTTP/1.1\r\n",
         "Host: test-server.io\r\n",

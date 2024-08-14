@@ -41,8 +41,8 @@ impl TranscriptConfig {
         builder
             .id(DEFAULT_RX_TRANSCRIPT_ID.to_string())
             .opaque_id(DEFAULT_OPAQUE_RX_TRANSCRIPT_ID.to_string())
-            .max_online_size(DEFAULT_TRANSCRIPT_MAX_SIZE)
-            .max_deferred_size(0);
+            .max_online_size(0)
+            .max_deferred_size(DEFAULT_TRANSCRIPT_MAX_SIZE);
 
         builder
     }
@@ -130,6 +130,15 @@ impl MpcTlsCommonConfig {
 #[derive(Debug, Clone, Builder)]
 pub struct MpcTlsLeaderConfig {
     common: MpcTlsCommonConfig,
+    /// Defers the decryption from the start of the connection.
+    ///
+    /// Decryption of responses will be deferred until after the TLS connection is closed. This is
+    /// useful if you either have only one request/response cycle of if you have several such
+    /// cycles but the content of the request never depends on the content of the previous response.
+    ///
+    /// This allows to decrypt responses locally without MPC, so this option saves bandwidth
+    /// and performance.
+    defer_decryption_from_start: bool,
 }
 
 impl MpcTlsLeaderConfig {
@@ -141,6 +150,11 @@ impl MpcTlsLeaderConfig {
     /// Returns the common config.
     pub fn common(&self) -> &MpcTlsCommonConfig {
         &self.common
+    }
+
+    /// Returns if deferred decryption is used from the start of the connection.
+    pub fn defer_decryption_from_start(&self) -> bool {
+        self.defer_decryption_from_start
     }
 }
 

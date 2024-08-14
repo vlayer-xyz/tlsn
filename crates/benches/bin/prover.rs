@@ -130,7 +130,6 @@ async fn run_instance<S: AsyncWrite + AsyncRead + Send + Sync + Unpin + 'static>
 
     let (mut mpc_tls_connection, prover_fut) = prover.connect(client_conn.compat()).await.unwrap();
 
-    let prover_ctrl = prover_fut.control();
     let prover_task = tokio::spawn(prover_fut);
 
     let request = format!(
@@ -138,10 +137,6 @@ async fn run_instance<S: AsyncWrite + AsyncRead + Send + Sync + Unpin + 'static>
         download_size,
         String::from_utf8(vec![0x42u8; upload_size]).unwrap(),
     );
-
-    if defer_decryption {
-        prover_ctrl.defer_decryption().await?;
-    }
 
     mpc_tls_connection.write_all(request.as_bytes()).await?;
     mpc_tls_connection.close().await?;

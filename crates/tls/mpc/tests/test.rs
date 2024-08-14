@@ -20,6 +20,8 @@ use tls_mpc::{
 };
 use tls_server_fixture::{bind_test_server_hyper, CA_CERT_DER, SERVER_DOMAIN};
 use tokio_util::compat::TokioAsyncReadCompatExt;
+use tracing::Level;
+use tracing_subscriber::fmt::format::FmtSpan;
 use uid_mux::{
     test_utils::{test_framed_mux, TestFramedMux},
     FramedUidMux,
@@ -318,8 +320,12 @@ async fn follower(config: MpcTlsCommonConfig, mux: TestFramedMux) {
 #[tokio::test]
 #[ignore]
 async fn test() {
-    tracing_subscriber::fmt::init();
+    let subscriber = tracing_subscriber::fmt()
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .with_max_level(Level::TRACE)
+        .finish();
 
+    tracing::subscriber::set_global_default(subscriber).unwrap();
     let (leader_mux, follower_mux) = test_framed_mux(8);
 
     let common_config = MpcTlsCommonConfig::builder().id("test").build().unwrap();

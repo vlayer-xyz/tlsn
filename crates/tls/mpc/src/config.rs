@@ -130,7 +130,7 @@ impl MpcTlsCommonConfig {
 #[derive(Debug, Clone, Builder)]
 pub struct MpcTlsLeaderConfig {
     common: MpcTlsCommonConfig,
-    /// Defers the decryption from the start of the connection.
+    /// Defers the decryption from the start of the connection until after the connection is closed.
     ///
     /// Decryption of responses will be deferred until after the TLS connection is closed. This is
     /// useful if you either have only one request/response cycle of if you have several such

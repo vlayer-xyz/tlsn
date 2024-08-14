@@ -336,6 +336,9 @@ impl MpcTlsLeader {
 
     #[instrument(level = "debug", skip_all, err)]
     async fn commit(&mut self) -> Result<(), MpcTlsError> {
+        if self.committed {
+            return Ok(());
+        }
         self.state.try_as_active()?;
 
         debug!("committing to transcript");

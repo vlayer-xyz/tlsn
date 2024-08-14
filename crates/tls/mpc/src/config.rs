@@ -138,6 +138,7 @@ pub struct MpcTlsLeaderConfig {
     ///
     /// This allows to decrypt responses locally without MPC, so this option saves bandwidth
     /// and performance.
+    #[builder(default = "true")]
     defer_decryption_from_start: bool,
 }
 

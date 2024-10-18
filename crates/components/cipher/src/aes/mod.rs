@@ -261,7 +261,7 @@ mod tests {
             .assign(&mut ev, nonce, start_counter, msg.clone())
             .unwrap();
 
-        let (ciphertext_gen, ciphetext_ev) = futures::try_join!(
+        let (ciphertext_gen, ciphetext_ev) = tokio::try_join!(
             async {
                 let out = gen.decode(out_gen).unwrap();
                 gen.flush(&mut ctx_a).await.unwrap();
@@ -307,7 +307,7 @@ mod tests {
             .unwrap();
         let block_ev = aes_ev.assign_block(&mut ev, block_ref_ev, input).unwrap();
 
-        let (ciphertext_gen, ciphetext_ev) = futures::try_join!(
+        let (ciphertext_gen, ciphetext_ev) = tokio::try_join!(
             async {
                 let out = gen.decode(block_gen).unwrap();
                 gen.flush(&mut ctx_a).await.unwrap();

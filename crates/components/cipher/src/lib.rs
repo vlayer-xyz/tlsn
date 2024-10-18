@@ -92,7 +92,7 @@ impl<C: CipherCircuit> Keystream<C> {
     where
         V: Vm<Binary>,
     {
-        if self.block_len() * <C::Block as StaticSize<Binary>>::SIZE < input.len() {
+        if self.block_len() * <C::Block as StaticSize<Binary>>::SIZE < 8 * input.len() {
             return Err(CipherError::new("input is too long for keystream"));
         }
 
@@ -100,8 +100,8 @@ impl<C: CipherCircuit> Keystream<C> {
         keystream.truncate(input.len());
 
         let xor = build_xor_circuit(&[ValueType::new_array::<u8>(input.len())]);
-        let call = CallBuilder::new(xor).arg(keystream).arg(input).build()?;
 
+        let call = CallBuilder::new(xor).arg(keystream).arg(input).build()?;
         let output: Vector<U8> = vm.call(call).map_err(CipherError::new)?;
 
         let cipher_output = CipherOutput {

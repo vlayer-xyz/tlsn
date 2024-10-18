@@ -228,10 +228,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_aes_ctr() {
-        let key = [0_u8; 16];
-        let iv = [0_u8; 4];
-        let nonce = [0_u8; 8];
-        let start_counter = 0;
+        let key = [42_u8; 16];
+        let iv = [3_u8; 4];
+        let nonce = [5_u8; 8];
+        let start_counter = 3;
 
         let (mut ctx_a, mut ctx_b) = test_st_executor(8);
         let (mut gen, mut ev) = mock_vm::<TestSTExecutor>();
@@ -239,10 +239,11 @@ mod tests {
         let aes_gen = setup(key, iv, &mut gen);
         let aes_ev = setup(key, iv, &mut ev);
 
-        let keystream_gen = aes_gen.alloc(&mut gen, 1).unwrap();
-        let keystream_ev = aes_ev.alloc(&mut ev, 1).unwrap();
-
         let msg = b"This is a test message which will be encrypted using AES-CTR.".to_vec();
+        let block_count = (msg.len() / 16) + (msg.len() % 16 != 0) as usize;
+
+        let keystream_gen = aes_gen.alloc(&mut gen, block_count).unwrap();
+        let keystream_ev = aes_ev.alloc(&mut ev, block_count).unwrap();
 
         let msg_ref_gen: Vector<U8> = gen.alloc_vec(msg.len()).unwrap();
         gen.mark_public(msg_ref_gen).unwrap();
@@ -262,18 +263,18 @@ mod tests {
 
         let (ciphertext_gen, ciphetext_ev) = futures::try_join!(
             async {
+                let out = gen.decode(out_gen).unwrap();
                 gen.flush(&mut ctx_a).await.unwrap();
                 gen.execute(&mut ctx_a).await.unwrap();
                 gen.flush(&mut ctx_a).await.unwrap();
-
-                gen.decode(out_gen).unwrap().await
+                out.await
             },
             async {
+                let out = ev.decode(out_ev).unwrap();
                 ev.flush(&mut ctx_b).await.unwrap();
                 ev.execute(&mut ctx_b).await.unwrap();
                 ev.flush(&mut ctx_b).await.unwrap();
-
-                ev.decode(out_ev).unwrap().await
+                out.await
             }
         )
         .unwrap();

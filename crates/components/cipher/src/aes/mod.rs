@@ -236,8 +236,8 @@ mod tests {
         let (mut ctx_a, mut ctx_b) = test_st_executor(8);
         let (mut gen, mut ev) = mock_vm::<TestSTExecutor>();
 
-        let aes_gen = setup(key, iv, &mut gen);
-        let aes_ev = setup(key, iv, &mut ev);
+        let aes_gen = setup_ctr(key, iv, &mut gen);
+        let aes_ev = setup_ctr(key, iv, &mut ev);
 
         let msg = b"This is a test message which will be encrypted using AES-CTR.".to_vec();
         let block_count = (msg.len() / 16) + (msg.len() % 16 != 0) as usize;
@@ -285,9 +285,50 @@ mod tests {
         assert_eq!(ciphertext_gen, expected);
     }
 
-    fn test_aes_ecb() {
+    #[tokio::test]
+    async fn test_aes_ecb() {
+        let key = [1_u8; 16];
+        let input = [5_u8; 16];
+
         let (mut ctx_a, mut ctx_b) = test_st_executor(8);
-        todo!()
+        let (mut gen, mut ev) = mock_vm::<TestSTExecutor>();
+
+        let aes_gen = setup_block(key, &mut gen);
+        let aes_ev = setup_block(key, &mut ev);
+
+        let block_ref_gen: Array<U8, 16> = gen.alloc().unwrap();
+        gen.mark_public(block_ref_gen).unwrap();
+
+        let block_ref_ev: Array<U8, 16> = ev.alloc().unwrap();
+        ev.mark_public(block_ref_ev).unwrap();
+
+        let block_gen = aes_gen
+            .assign_block(&mut gen, block_ref_gen, input)
+            .unwrap();
+        let block_ev = aes_ev.assign_block(&mut ev, block_ref_ev, input).unwrap();
+
+        let (ciphertext_gen, ciphetext_ev) = futures::try_join!(
+            async {
+                let out = gen.decode(block_gen).unwrap();
+                gen.flush(&mut ctx_a).await.unwrap();
+                gen.execute(&mut ctx_a).await.unwrap();
+                gen.flush(&mut ctx_a).await.unwrap();
+                out.await
+            },
+            async {
+                let out = ev.decode(block_ev).unwrap();
+                ev.flush(&mut ctx_b).await.unwrap();
+                ev.execute(&mut ctx_b).await.unwrap();
+                ev.flush(&mut ctx_b).await.unwrap();
+                out.await
+            }
+        )
+        .unwrap();
+
+        assert_eq!(ciphertext_gen, ciphetext_ev);
+
+        let expected = aes128(key, input);
+        assert_eq!(ciphertext_gen, expected);
     }
 
     fn mock_vm<Ctx>() -> (
@@ -308,7 +349,7 @@ mod tests {
         (gen, ev)
     }
 
-    fn setup<V, Ctx>(key: [u8; 16], iv: [u8; 4], vm: &mut V) -> MpcAes
+    fn setup_ctr<V, Ctx>(key: [u8; 16], iv: [u8; 4], vm: &mut V) -> MpcAes
     where
         V: Vm<Binary> + Memory<Binary> + View<Binary> + Execute<Ctx>,
         Ctx: Context,
@@ -329,6 +370,23 @@ mod tests {
 
         Cipher::<Aes128, V>::set_key(&mut aes, key_ref);
         Cipher::<Aes128, V>::set_iv(&mut aes, iv_ref);
+
+        aes
+    }
+
+    fn setup_block<V, Ctx>(key: [u8; 16], vm: &mut V) -> MpcAes
+    where
+        V: Vm<Binary> + Memory<Binary> + View<Binary> + Execute<Ctx>,
+        Ctx: Context,
+    {
+        let key_ref: Array<U8, 16> = vm.alloc().unwrap();
+        vm.mark_public(key_ref).unwrap();
+        vm.assign(key_ref, key).unwrap();
+        vm.commit(key_ref).unwrap();
+
+        let config = CipherConfig::builder().id("test").build().unwrap();
+        let mut aes = MpcAes::new(config);
+        Cipher::<Aes128, V>::set_key(&mut aes, key_ref);
 
         aes
     }
@@ -357,5 +415,15 @@ mod tests {
         cipher.apply_keystream(&mut out);
 
         out
+    }
+
+    fn aes128(key: [u8; 16], msg: [u8; 16]) -> [u8; 16] {
+        use ::aes::Aes128 as TestAes128;
+        use ::cipher::{BlockEncrypt, KeyInit};
+
+        let mut msg = msg.into();
+        let cipher = TestAes128::new(&key.into());
+        cipher.encrypt_block(&mut msg);
+        msg.into()
     }
 }

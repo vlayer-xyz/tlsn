@@ -21,12 +21,10 @@ pub use spec::{Spec1, Spec15, Spec2};
 ///
 /// Panics if the provided input's length is not 15, 2, or 1 field elements.
 pub fn hash(input: &[bn256::Fr]) -> bn256::Fr {
-
     match input.len() {
+        15 => Hash::<bn256::Fr, spec::Spec15, ConstantLength<15>, 16, 15>::init()
+            .hash(input.try_into().unwrap()),
 
-        15 =>            Hash::<bn256::Fr, spec::Spec15, ConstantLength<15>, 16, 15>::init()
-                .hash(input.try_into().unwrap()),
-       
         2 => Hash::<bn256::Fr, spec::Spec2, ConstantLength<2>, 3, 2>::init()
             .hash(input.try_into().unwrap()),
         1 => Hash::<bn256::Fr, spec::Spec1, ConstantLength<1>, 2, 1>::init()
@@ -37,13 +35,11 @@ pub fn hash(input: &[bn256::Fr]) -> bn256::Fr {
 
 #[cfg(test)]
 mod circom_compat {
+    use poseidon_bn254::{hash_with_domain, Fr};
     use tetris::{
-        gadget::poseidon::{
-            reference::{Permutation, Poseidon},
-        },
+        gadget::poseidon::reference::{Permutation, Poseidon},
         witness::field::Field,
     };
-    use poseidon_bn254::{hash_with_domain, Fr};
 
     use super::*;
 
@@ -91,7 +87,6 @@ mod circom_compat {
         let tlsnh2p = Hash::<bn256::Fr, spec::Spec2, ConstantLength<2>, 3, 2>::init()
             .hash(start_at_zero_inputs.try_into().unwrap());
         println!("tlsn/halo2-poseidon: {:?}", tlsnh2p);
-
 
         expect_decimal(
             "14763215145315200506921711489642608356394854266165572616578112107564877678998",

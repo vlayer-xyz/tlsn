@@ -21,9 +21,22 @@ pub async fn run() -> Result<Vec<TestResult>> {
         .request_timeout(Duration::from_secs(60))
         .user_data_dir(".")
         .no_sandbox()
-        .enable_request_intercept()
         .disable_cache()
         .incognito() // Run in incognito mode to avoid unexplained WS connection errors in chromiumoxide.
+        .args([
+           "--no-first-run",
+           "--no-pings",
+           "--disable-first-run-ui",
+           "--disable-gaia-services",
+           "--single-process",
+           "--enable-service-manager-tracing",
+           "--enable-tracing",
+           "--enable-tracing-output",
+           "--trace-startup=base,net,memory-infra",
+           "--enable-heap-profiling",
+           "--startup-trace-file=startup.log",
+           "--trace-to-file=net,memory-infra",
+           "--trace-to-file-name=wasm-test-runner.memoryinfra.log",
         .build()
         .map_err(|s| anyhow!(s))?;
 

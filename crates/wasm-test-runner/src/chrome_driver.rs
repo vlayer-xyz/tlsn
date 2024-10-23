@@ -9,9 +9,7 @@ use chromiumoxide::{
 use futures::{Future, FutureExt, StreamExt};
 use std::{env, time::Duration};
 use tracing::{debug, error, instrument};
-use async_std::task::sleep;
-use std::sync::Arc;
-use std::time::Duration;
+
 
 use crate::{TestResult, DEFAULT_SERVER_IP, DEFAULT_WASM_PORT};
 
@@ -65,8 +63,6 @@ pub async fn run() -> Result<Vec<TestResult>> {
     tokio::spawn(register_listeners(&page).await?);
 
     page.wait_for_navigation().await?;
-
-    sleep(Duration::from_secs(5)).await;
     
     let results: Vec<TestResult> = page
         .evaluate(

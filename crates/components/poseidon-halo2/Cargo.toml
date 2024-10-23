@@ -15,4 +15,11 @@ ff = "0.13"
 group = "0.13"
 halo2_poseidon = { git = "https://github.com/privacy-scaling-explorations/poseidon-gadget", rev="764a682"}
 halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2", tag = "v0.3.0", default-features = false}
+
+[dev-dependencies]
 tetris = { git = "https://github.com/kilic/tetris/", features = ["halo2"] }
+poseidon-bn254 = { git = "https://github.com/scroll-tech/poseidon-bn254" }
+num-bigint = {version = "0.4", features = ["rand"]}
+num-integer = "0.1"
+num-traits = "0.2"
+poseidon-base = { git = "https://github.com/scroll-tech/poseidon-circuit" }

@@ -18,7 +18,8 @@ impl Spec<F, 16, 15> for Spec15 {
 
     fn partial_rounds() -> usize {
         // Taken from https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom
-        // (see "var N_ROUNDS_P[16]"), where they use 64 partial rounds for 15-rate Poseidon
+        // (see "var N_ROUNDS_P[16]"), where they use 64 partial rounds for 15-rate
+        // Poseidon
         64
     }
 
@@ -51,9 +52,9 @@ impl Spec<F, 3, 2> for Spec2 {
 
     fn partial_rounds() -> usize {
         // Taken from https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom
-        // (see "var N_ROUNDS_P[16]"), where they use 57 partial rounds for 2-rate Poseidon.
-        // Note: the Poseidon gadget requires the round count to be an even number acc.to
-        // https://github.com/privacy-scaling-explorations/poseidon-gadget/blob/764a682ee448bfbde0cc92a04d241fe738ba2d14/src/poseidon/pow5.rs#L67
+        // (see "var N_ROUNDS_P[16]"), where they use 57 partial rounds for 2-rate
+        // Poseidon. Note: the Poseidon gadget requires the round count to be an
+        // even number acc.to https://github.com/privacy-scaling-explorations/poseidon-gadget/blob/764a682ee448bfbde0cc92a04d241fe738ba2d14/src/poseidon/pow5.rs#L67
         56
     }
 
@@ -86,7 +87,8 @@ impl Spec<F, 2, 1> for Spec1 {
 
     fn partial_rounds() -> usize {
         // Taken from https://github.com/iden3/circomlib/blob/master/circuits/poseidon.circom
-        // (see "var N_ROUNDS_P[16]"), where they use 56 partial rounds for 1-rate Poseidon
+        // (see "var N_ROUNDS_P[16]"), where they use 56 partial rounds for 1-rate
+        // Poseidon
         56
     }
 

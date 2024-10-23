@@ -923,8 +923,9 @@ pub(crate) const ROUND_CONSTANTS: [[F; 2]; 64] = [
 // [True, None]
 //Result Algorithm 3:
 // [True, None]
-//Prime number: 0x0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001
-//MDS matrix:
+//Prime number:
+// 0x0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001
+// MDS matrix:
 pub(crate) const MDS: [[F; 2]; 2] = [
     [
         F::from_raw([

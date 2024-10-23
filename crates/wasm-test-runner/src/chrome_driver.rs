@@ -37,6 +37,7 @@ pub async fn run() -> Result<Vec<TestResult>> {
            "--startup-trace-file=startup.log",
            "--trace-to-file=net,memory-infra",
            "--trace-to-file-name=wasm-test-runner.memoryinfra.log",
+        ]) // end args; turn off google oauth & enable tracing for testing
         .build()
         .map_err(|s| anyhow!(s))?;
 

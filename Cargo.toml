@@ -11,6 +11,7 @@ members = [
     "crates/components/hmac-sha256",
     "crates/components/hmac-sha256-circuits",
     "crates/components/key-exchange",
+    "crates/components/poseidon",
     "crates/components/stream-cipher",
     "crates/components/universal-hash",
     "crates/core",

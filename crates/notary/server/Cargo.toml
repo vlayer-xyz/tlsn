@@ -3,17 +3,6 @@ name = "notary-server"
 version = "0.1.0-alpha.8-pre"
 edition = "2021"
 
-[features]
-tee_quote = [
-	"dep:mc-sgx-dcap-types", 
-	"dep:hex", 
-	"dep:rand_chacha", 
-	"dep:once_cell",
-	"dep:simple_asn1",
-        "dep:pem",
-	"dep:lazy_static",
-]
-
 [dependencies]
 tlsn-core = { workspace = true }
 tlsn-common = { workspace = true }
@@ -64,8 +53,23 @@ once_cell = { workspace = true, optional =true }
 simple_asn1 = {version = "0.6.2", optional = true }
 pem = { version =  "1.1.0", optional = true }
 lazy_static = { version = "1.4", optional = true }
+tdx-guest = { version = "0.1.0", optional = true }
 
 [build-dependencies]
 git2 = "0.19.0"
 chrono.workspace = true
 
+[features]
+intel_sgx = ["dep:mc-sgx-dcap-types", "tee_quote"]
+intel_tdx = ["dep:tdx-guest", "tee_quote"]
+sev = []
+snp = []
+nitro = []
+tee_quote = [
+	"dep:hex", 
+	"dep:rand_chacha", 
+	"dep:once_cell",
+	"dep:simple_asn1",
+        "dep:pem",
+	"dep:lazy_static",
+]

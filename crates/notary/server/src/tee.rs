@@ -15,6 +15,9 @@ use std::{
 };
 use tracing::{debug, error, instrument};
 
+#[cfg(feature = "intel_tdx")]
+use tdx_guest::{init_tdx};
+
 lazy_static::lazy_static! {
     static ref SECP256K1_OID: simple_asn1::OID = simple_asn1::oid!(1, 3, 132, 0, 10);
     static ref ECDSA_OID: simple_asn1::OID = simple_asn1::oid!(1, 2, 840, 10045, 2, 1);
@@ -161,7 +164,17 @@ pub fn generate_ephemeral_keypair(notary_private: &str, notary_public: &str) {
         .map_err(|_| "Public key has already been set");
 }
 
+pub fn detect_platform() -> bool {
+ init_tdx().is_ok() || Path::new("/dev/tdx_guest").exists()
+}
+
+
+#[instrument(level = "debug", skip_all)]
 pub async fn quote() -> Quote {
+    #[cfg(feature = "intel_tdx")]
+    let td_info = init_tdx().unwrap();
+    #[cfg(feature = "intel_tdx")]
+
     //// tee-detection logic will live here, for now its only gramine-sgx
     match gramine_quote().await {
         Ok(quote) => quote,

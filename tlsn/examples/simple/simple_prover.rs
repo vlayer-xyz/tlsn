@@ -5,54 +5,82 @@ use http_body_util::Empty;
 use http_body_util::BodyExt;
 use hyper::{body::Bytes, Request, StatusCode};
 use hyper_util::rt::TokioIo;
+use notary_client::{Accepted, NotarizationRequest, NotaryClient};
 use std::ops::Range;
 use tlsn_core::{proof::TlsProof, transcript::get_value_ids};
 use tokio::io::AsyncWriteExt as _;
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
-use tlsn_examples::run_notary;
 use tlsn_prover::tls::{state::Notarize, Prover, ProverConfig};
 
 // Setting of the application server
 const SERVER_DOMAIN: &str = "mhchia.github.io";
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
+// Change constants to be optional defaults
+const DEFAULT_NOTARY_HOST: &str = "127.0.0.1";
+const DEFAULT_NOTARY_PORT: u16 = 7047;
+
+// P/S: If the following limits are increased, please ensure max-transcript-size of
+// the notary server's config (../../../notary/server) is increased too, where
+// max-transcript-size = MAX_SENT_DATA + MAX_RECV_DATA
+//
+// Maximum number of bytes that can be sent from prover to server
+const MAX_SENT_DATA: usize = 1 << 12;
+// Maximum number of bytes that can be received by prover from server
+const MAX_RECV_DATA: usize = 1 << 14;
+
 use std::{env, str};
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    // Get party index from command line argument
-    let party_index = match env::args().nth(1) {
-        Some(index) => match index.as_str() {
-            "0" | "1" | "2" => index,
-            _ => {
-                eprintln!("Error: Party index must be 0, 1, or 2");
-                std::process::exit(1);
-            }
-        },
-        None => {
-            eprintln!("Error: Party index not provided");
-            std::process::exit(1);
-        }
-    };
+    let args: Vec<String> = env::args().collect();
 
-    let (prover_socket, notary_socket) = tokio::io::duplex(1 << 16);
+    // Get notary host and port from arguments or use defaults
+    let notary_host = args.get(1).map_or(DEFAULT_NOTARY_HOST, |h| h.as_str());
+    let notary_port = args.get(2)
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(DEFAULT_NOTARY_PORT);
 
-    // Start a local simple notary service
-    tokio::spawn(run_notary(notary_socket.compat()));
-
-    // A Prover configuration
-    let config = ProverConfig::builder()
-        .id("example")
-        .server_dns(SERVER_DOMAIN)
+    // Build a client to connect to the notary server.
+    let notary_client = NotaryClient::builder()
+        .host(notary_host)
+        .port(notary_port)
+        // WARNING: Always use TLS to connect to notary server, except if notary is running locally
+        // e.g. this example, hence `enable_tls` is set to False (else it always defaults to True).
+        .enable_tls(true)
         .build()
         .unwrap();
 
-    // Create a Prover and set it up with the Notary
-    // This will set up the MPC backend prior to connecting to the server.
-    let prover = Prover::new(config)
-        .setup(prover_socket.compat())
+    // Send requests for configuration and notarization to the notary server.
+    let notarization_request = NotarizationRequest::builder()
+        .max_sent_data(MAX_SENT_DATA)
+        .max_recv_data(MAX_RECV_DATA)
+        .build()
+        .unwrap();
+
+    let Accepted {
+        io: notary_connection,
+        id: session_id,
+        ..
+    } = notary_client
+        .request_notarization(notarization_request)
+        .await
+        .unwrap();
+
+    // Configure a new prover with the unique session id returned from notary client.
+    let prover_config = ProverConfig::builder()
+        .id(session_id)
+        .server_dns(SERVER_DOMAIN)
+        .max_sent_data(MAX_SENT_DATA)
+        .max_recv_data(MAX_RECV_DATA)
+        .build()
+        .unwrap();
+
+    // Create a new prover and set up the MPC backend.
+    let prover = Prover::new(prover_config)
+        .setup(notary_connection.compat())
         .await
         .unwrap();
 
@@ -81,7 +109,7 @@ async fn main() {
 
     // Build a simple HTTP request with common headers
     let request = Request::builder()
-        .uri(format!("/followers-page/party_{}.html", party_index))
+        .uri("/followers-page/party_0.html")
         .header("Host", SERVER_DOMAIN)
         .header("Accept", "*/*")
         // Using "identity" instructs the Server not to use compression for its HTTP response.
@@ -119,7 +147,7 @@ async fn main() {
         })
         .unwrap();
 
-    println!("Party {} has {} followers", party_index, followers_count);
+    println!("Party 0 has {} followers", followers_count);
 
     // The Prover task should be done now, so we can grab the Prover.
     let prover = prover_task.await.unwrap().unwrap();
@@ -135,9 +163,7 @@ async fn main() {
         build_proof_with_redactions(prover).await
     };
 
-    // Write the proof to a file
-    let args: Vec<String> = std::env::args().collect();
-    let file_dest = args.get(2).expect("Please provide a file destination as the second argument");
+    let file_dest = args.get(3).expect("Please provide a file destination as the second argument");
     let mut file = tokio::fs::File::create(file_dest).await.unwrap();
     file.write_all(serde_json::to_string_pretty(&proof).unwrap().as_bytes())
         .await

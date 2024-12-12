@@ -28,20 +28,29 @@ enum State {
         /// The private key of the party behind this instance, either follower or leader.
         private_key: SecretKey,
     },
+    Setup {
+        private_key: SecretKey,
+        share_a0: Array<U8, 32>,
+        share_b0: Array<U8, 32>,
+        share_a1: Array<U8, 32>,
+        share_b1: Array<U8, 32>,
+        eq: Array<U8, 32>,
+    },
     SetServerKey {
         private_key: SecretKey,
         /// The public key of the server.
         server_key: PublicKey,
+        share_a0: Array<U8, 32>,
+        share_b0: Array<U8, 32>,
+        share_a1: Array<U8, 32>,
+        share_b1: Array<U8, 32>,
+        eq: Array<U8, 32>,
     },
     SetAllKeys {
         private_key: SecretKey,
         server_key: PublicKey,
         /// The public key of the follower
         follower_key: PublicKey,
-    },
-    Setup {
-        private_key: SecretKey,
-        server_key: PublicKey,
         share_a0: Array<U8, 32>,
         share_b0: Array<U8, 32>,
         share_a1: Array<U8, 32>,
@@ -106,7 +115,7 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
         <C1 as AdditiveToMultiplicative<P256>>::Future: Send,
         <C1 as MultiplicativeToAdditive<P256>>::Future: Send,
     {
-        let State::Setup {
+        let State::SetAllKeys {
             private_key,
             server_key,
             share_a0,
@@ -114,10 +123,11 @@ impl<C0, C1> MpcKeyExchange<C0, C1> {
             share_a1,
             share_b1,
             eq,
+            ..
         } = std::mem::replace(&mut self.state, State::Error)
         else {
             return Err(KeyExchangeError::state(
-                "should be in Setup state to compute pms",
+                "should be in SetAllKeys state to compute pms",
             ));
         };
         let (pms_0, pms_1) = compute_ec_shares(
@@ -169,16 +179,28 @@ where
             return Err(KeyExchangeError::role("follower cannot set server key"));
         };
 
-        let State::Initialized { private_key } = std::mem::replace(&mut self.state, State::Error)
+        let State::Setup {
+            private_key,
+            share_a0,
+            share_b0,
+            share_a1,
+            share_b1,
+            eq,
+        } = std::mem::replace(&mut self.state, State::Error)
         else {
             return Err(KeyExchangeError::state(
-                "Leader must be in Initialized state to set the server key",
+                "leader must be in Setup state to set the server key",
             ));
         };
 
         self.state = State::SetServerKey {
             private_key,
             server_key,
+            share_a0,
+            share_b0,
+            share_a1,
+            share_b1,
+            eq,
         };
         Ok(())
     }
@@ -187,7 +209,6 @@ where
         match self.state {
             State::SetServerKey { server_key, .. } => Some(server_key),
             State::SetAllKeys { server_key, .. } => Some(server_key),
-            State::Setup { server_key, .. } => Some(server_key),
             _ => None,
         }
     }
@@ -221,29 +242,12 @@ where
 
     #[instrument(level = "debug", skip_all, err)]
     fn setup(&mut self, vm: &mut V) -> Result<Pms, KeyExchangeError> {
-        let (private_key, server_key) = if let Role::Leader = self.config.role() {
-            let State::SetAllKeys {
-                private_key,
-                server_key,
-                ..
-            } = std::mem::replace(&mut self.state, State::Error)
-            else {
-                return Err(KeyExchangeError::state("leader not in SetAllKeys state"));
-            };
-            (private_key, server_key)
-        } else {
-            let State::SetServerKey {
-                private_key,
-                server_key,
-            } = std::mem::replace(&mut self.state, State::Error)
-            else {
-                return Err(KeyExchangeError::state(
-                    "follower not in SetServerKey state",
-                ));
-            };
-            (private_key, server_key)
+        let State::Initialized { private_key } = std::mem::replace(&mut self.state, State::Error)
+        else {
+            return Err(KeyExchangeError::state(
+                "should be in Initialized state to call setup",
+            ));
         };
-
         let (share_a0, share_b0, share_a1, share_b1) = match self.config.role() {
             Role::Leader => {
                 let share_a0: Array<U8, 32> = vm.alloc().map_err(KeyExchangeError::vm)?;
@@ -296,7 +300,6 @@ where
             share_b1,
             eq,
             private_key,
-            server_key,
         };
 
         Ok(Pms::new(pms))
@@ -378,9 +381,12 @@ where
 
     fn wants_flush(&self) -> bool {
         if let Role::Leader = self.config.role() {
-            matches!(self.state, State::SetServerKey { .. } | State::Setup { .. })
+            matches!(
+                self.state,
+                State::SetServerKey { .. } | State::SetAllKeys { .. }
+            )
         } else {
-            matches!(self.state, State::Initialized { .. } | State::Setup { .. })
+            matches!(self.state, State::Setup { .. } | State::SetAllKeys { .. })
         }
     }
 
@@ -390,6 +396,11 @@ where
                 State::SetServerKey {
                     server_key,
                     private_key,
+                    share_a0,
+                    share_b0,
+                    share_a1,
+                    share_b1,
+                    eq,
                 } => {
                     ctx.io_mut()
                         .send(*server_key)
@@ -404,16 +415,29 @@ where
                         private_key: private_key.clone(),
                         server_key: *server_key,
                         follower_key,
+                        share_a0: *share_a0,
+                        share_b0: *share_b0,
+                        share_a1: *share_a1,
+                        share_b1: *share_b1,
+                        eq: *eq,
                     };
                 }
-                State::Setup { .. } => self.compute_ec_shares(ctx).await?,
+                State::SetAllKeys { .. } => self.compute_ec_shares(ctx).await?,
                 _ => (),
             }
         } else {
             match &mut self.state {
-                State::Initialized { private_key } => {
+                State::Setup {
+                    private_key,
+                    share_a0,
+                    share_b0,
+                    share_a1,
+                    share_b1,
+                    eq,
+                } => {
+                    let follower_key = private_key.public_key();
                     ctx.io_mut()
-                        .send(private_key.public_key())
+                        .send(follower_key)
                         .await
                         .map_err(KeyExchangeError::io)?;
                     let server_key: PublicKey = ctx
@@ -421,12 +445,18 @@ where
                         .expect_next()
                         .await
                         .map_err(KeyExchangeError::io)?;
-                    self.state = State::SetServerKey {
+                    self.state = State::SetAllKeys {
                         private_key: private_key.clone(),
                         server_key,
+                        follower_key,
+                        share_a0: *share_a0,
+                        share_b0: *share_b0,
+                        share_a1: *share_a1,
+                        share_b1: *share_b1,
+                        eq: *eq,
                     };
                 }
-                State::Setup { .. } => self.compute_ec_shares(ctx).await?,
+                State::SetAllKeys { .. } => self.compute_ec_shares(ctx).await?,
                 _ => (),
             }
         }
@@ -520,6 +550,7 @@ mod tests {
     async fn test_key_exchange() {
         let mut rng = ChaCha12Rng::from_seed([0_u8; 32]);
         let (mut ctx_a, mut ctx_b) = test_st_executor(8);
+        let (mut gen, mut ev) = mock_vm();
 
         let leader_private_key = SecretKey::random(&mut rng);
         let follower_private_key = SecretKey::random(&mut rng);
@@ -532,6 +563,9 @@ mod tests {
 
         leader.set_private_key(leader_private_key.clone());
         follower.set_private_key(follower_private_key.clone());
+
+        leader.setup(&mut gen).unwrap();
+        follower.setup(&mut ev).unwrap();
 
         KeyExchange::<Generator<IdealCOTSender>>::set_server_key(&mut leader, server_public_key)
             .unwrap();
@@ -570,6 +604,9 @@ mod tests {
         leader.set_private_key(leader_private_key.clone());
         follower.set_private_key(follower_private_key.clone());
 
+        leader.setup(&mut gen).unwrap();
+        follower.setup(&mut ev).unwrap();
+
         KeyExchange::<Generator<IdealCOTSender>>::set_server_key(&mut leader, server_public_key)
             .unwrap();
 
@@ -586,9 +623,6 @@ mod tests {
 
         let _client_public_key =
             KeyExchange::<Generator<IdealCOTSender>>::client_key(&leader).unwrap();
-
-        leader.setup(&mut gen).unwrap();
-        follower.setup(&mut ev).unwrap();
 
         tokio::try_join!(leader.flush(&mut ctx_a), follower.flush(&mut ctx_b)).unwrap();
 
@@ -693,6 +727,9 @@ mod tests {
         leader.set_private_key(leader_private_key.clone());
         follower.set_private_key(follower_private_key.clone());
 
+        leader.setup(&mut gen).unwrap();
+        follower.setup(&mut ev).unwrap();
+
         KeyExchange::<Generator<IdealCOTSender>>::set_server_key(&mut leader, server_public_key)
             .unwrap();
 
@@ -700,9 +737,6 @@ mod tests {
 
         let _client_public_key =
             KeyExchange::<Generator<IdealCOTSender>>::client_key(&leader).unwrap();
-
-        leader.setup(&mut gen).unwrap();
-        follower.setup(&mut ev).unwrap();
 
         tokio::try_join!(leader.flush(&mut ctx_a), follower.flush(&mut ctx_b)).unwrap();
 

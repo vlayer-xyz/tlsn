@@ -40,52 +40,58 @@ async fn create_presentation(example_type: &ExampleType) -> Result<(), Box<dyn s
     // Build a transcript proof.
     let mut builder = secrets.transcript_proof_builder();
 
-    let request = &transcript.requests[0];
-    // Reveal the structure of the request without the headers or body.
-    builder.reveal_sent(&request.without_data())?;
-    // Reveal the request target.
-    builder.reveal_sent(&request.request.target)?;
-    // Reveal all headers except the values of User-Agent and Authorization.
-    for header in &request.headers {
-        if !(header
-            .name
-            .as_str()
-            .eq_ignore_ascii_case(header::USER_AGENT.as_str())
-            || header
+    let simple_commit = true;
+    if simple_commit {
+        builder.reveal_sent(&(0..secrets.transcript().sent().len()))?;
+        builder.reveal_recv(&(0..secrets.transcript().received().len()))?;
+    } else {
+        let request = &transcript.requests[0];
+        // Reveal the structure of the request without the headers or body.
+        builder.reveal_sent(&request.without_data())?;
+        // Reveal the request target.
+        builder.reveal_sent(&request.request.target)?;
+        // Reveal all headers except the values of User-Agent and Authorization.
+        for header in &request.headers {
+            if !(header
                 .name
                 .as_str()
-                .eq_ignore_ascii_case(header::AUTHORIZATION.as_str()))
-        {
-            builder.reveal_sent(header)?;
-        } else {
-            builder.reveal_sent(&header.without_value())?;
-        }
-    }
-
-    // Reveal only parts of the response
-    let response = &transcript.responses[0];
-    builder.reveal_recv(&response.without_data())?;
-    for header in &response.headers {
-        builder.reveal_recv(header)?;
-    }
-
-    let content = &response.body.as_ref().unwrap().content;
-    match content {
-        tlsn_formats::http::BodyContent::Json(json) => {
-            // For experimentation, reveal the entire response or just a selection
-            let reveal_all = false;
-            if reveal_all {
-                builder.reveal_recv(response)?;
+                .eq_ignore_ascii_case(header::USER_AGENT.as_str())
+                || header
+                    .name
+                    .as_str()
+                    .eq_ignore_ascii_case(header::AUTHORIZATION.as_str()))
+            {
+                builder.reveal_sent(header)?;
             } else {
-                builder.reveal_recv(json.get("id").unwrap())?;
-                builder.reveal_recv(json.get("information.name").unwrap())?;
-                builder.reveal_recv(json.get("meta.version").unwrap())?;
+                builder.reveal_sent(&header.without_value())?;
             }
         }
-        tlsn_formats::http::BodyContent::Unknown(span) => {
-            builder.reveal_recv(span)?;
+
+        // Reveal only parts of the response
+        let response = &transcript.responses[0];
+        builder.reveal_recv(&response.without_data())?;
+        for header in &response.headers {
+            builder.reveal_recv(header)?;
         }
-        _ => {}
+
+        let content = &response.body.as_ref().unwrap().content;
+        match content {
+            tlsn_formats::http::BodyContent::Json(json) => {
+                // For experimentation, reveal the entire response or just a selection
+                let reveal_all = false;
+                if reveal_all {
+                    builder.reveal_recv(response)?;
+                } else {
+                    builder.reveal_recv(json.get("id").unwrap())?;
+                    builder.reveal_recv(json.get("information.name").unwrap())?;
+                    builder.reveal_recv(json.get("meta.version").unwrap())?;
+                }
+            }
+            tlsn_formats::http::BodyContent::Unknown(span) => {
+                builder.reveal_recv(span)?;
+            }
+            _ => {}
+        }
     }
 
     let transcript_proof = builder.build()?;

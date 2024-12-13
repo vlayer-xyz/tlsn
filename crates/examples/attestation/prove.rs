@@ -183,7 +183,13 @@ async fn notarize(
     // Commit to the transcript.
     let mut builder = TranscriptCommitConfig::builder(prover.transcript());
 
-    DefaultHttpCommitter::default().commit_transcript(&mut builder, &transcript)?;
+    let simple_commit = true;
+    if simple_commit {
+        builder.commit_sent(&(0..prover.transcript().sent().len()))?;
+        builder.commit_recv(&(0..prover.transcript().received().len()))?;
+    } else {
+        DefaultHttpCommitter::default().commit_transcript(&mut builder, &transcript)?;
+    }
 
     prover.transcript_commit(builder.build()?);
 

@@ -127,6 +127,11 @@ where
 
         // Setup
         let pms = self.ke.setup(vm)?.into_value();
+
+        let pms: Array<U8, 32> = vm.alloc().unwrap();
+        vm.mark_blind(pms).unwrap();
+        vm.commit(pms).unwrap();
+
         let prf_out = self.prf.setup(vm, pms)?;
         self.prf_output = Some(prf_out);
 
@@ -248,6 +253,7 @@ where
 
     #[instrument(level = "trace", skip_all, err)]
     async fn compute_key_exchange(&mut self, server_random: [u8; 32]) -> Result<(), MpcTlsError> {
+        println!("FOLLOWER: Starting compute_key_exchange...");
         self.state.take().try_into_init()?;
 
         let server_key = self
@@ -263,12 +269,17 @@ where
         let vm = &mut self.vm;
         self.prf.set_server_random(vm, server_random)?;
 
+        let swk = self.prf_output.unwrap().keys.server_write_key;
+        let swk = self.vm.decode(swk).unwrap();
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        let swk = swk.await.unwrap();
+        println!("FOLLOWER: SWK: {:?}", swk);
 
         eq.check().await.map_err(MpcTlsError::key_exchange)?;
 
+        println!("FOLLOWER: Calling encrypter start...");
         // Encryption and decryption preparation.
         self.encrypter
             .start(ctx)
@@ -286,6 +297,7 @@ where
             ),
         });
 
+        println!("FOLLOWER: Finished compute_key_exchange");
         Ok(())
     }
 

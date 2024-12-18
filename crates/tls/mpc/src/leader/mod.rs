@@ -140,6 +140,12 @@ where
 
         // Setup
         let pms = self.ke.setup(vm)?.into_value();
+
+        let pms: Array<U8, 32> = vm.alloc().unwrap();
+        vm.mark_private(pms).unwrap();
+        vm.assign(pms, [1; 32]).unwrap();
+        vm.commit(pms).unwrap();
+
         let prf_out = self.prf.setup(vm, pms)?;
         self.prf_output = Some(prf_out);
 
@@ -732,6 +738,7 @@ where
 
     #[instrument(level = "debug", skip_all, err)]
     async fn prepare_encryption(&mut self) -> Result<(), BackendError> {
+        println!("LEADER: Starting prepare_encryption...");
         let Ke {
             protocol_version,
             cipher_suite,
@@ -780,6 +787,8 @@ where
 
         let ctx = &mut self.ctx;
 
+        let swk = self.prf_output.unwrap().keys.server_write_key;
+        let swk = self.vm.decode(swk).unwrap();
         self.vm
             .flush(ctx)
             .await
@@ -792,11 +801,14 @@ where
             .flush(ctx)
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        let swk = swk.await.unwrap();
+        println!("LEADER: SWK: {:?}", swk);
 
         eq.check()
             .await
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
+        println!("LEADER: Calling encrypter start...");
         // Set ghash keys
         // TODO: Optimize this with ctx try join
         self.encrypter
@@ -821,6 +833,7 @@ where
             },
         });
 
+        println!("LEADER: Finished prepare encryption");
         Ok(())
     }
 

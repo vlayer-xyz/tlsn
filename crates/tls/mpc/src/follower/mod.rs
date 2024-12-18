@@ -250,18 +250,19 @@ where
     async fn compute_key_exchange(&mut self, server_random: [u8; 32]) -> Result<(), MpcTlsError> {
         self.state.take().try_into_init()?;
 
-        // Key exchange
-        let eq = self.ke.compute_pms(&mut self.vm)?;
-
         let server_key = self
             .ke
             .server_key()
-            .expect("server key should be set after computing pms");
+            .expect("server key should be set for follower");
+
+        // Key exchange
+        let eq = self.ke.compute_pms(&mut self.vm)?;
 
         // PRF
         let ctx = &mut self.ctx;
         let vm = &mut self.vm;
         self.prf.set_server_random(vm, server_random)?;
+
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;

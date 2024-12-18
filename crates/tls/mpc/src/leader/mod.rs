@@ -77,7 +77,7 @@ pub struct MpcTlsLeader<K, P, C, Sc, Ctx, V> {
     buffer: VecDeque<OpaqueMessage>,
     /// Whether we have already committed to the transcript.
     committed: bool,
-    prf_out: Option<PrfOutput>,
+    prf_output: Option<PrfOutput>,
 }
 
 impl<K, P, C, Sc, Ctx, V> MpcTlsLeader<K, P, C, Sc, Ctx, V>
@@ -123,7 +123,7 @@ where
             is_decrypting,
             buffer: VecDeque::new(),
             committed: false,
-            prf_out: None,
+            prf_output: None,
         }
     }
 
@@ -141,6 +141,7 @@ where
         // Setup
         let pms = self.ke.setup(vm)?.into_value();
         let prf_out = self.prf.setup(vm, pms)?;
+        self.prf_output = Some(prf_out);
 
         // Set up encryption
         self.cipher.set_key(prf_out.keys.client_write_key);
@@ -591,6 +592,11 @@ where
                 .set_server_key(server_key)
                 .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
+            self.ke
+                .flush(&mut self.ctx)
+                .await
+                .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
+
             Ok(())
         }
     }
@@ -653,7 +659,7 @@ where
             .set_sf_hash(&mut self.vm, hash)
             .map_err(|err| BackendError::ServerFinished(err.to_string()))?;
 
-        let sf_vd = self.prf_out.expect("Prf output should be set").sf_vd;
+        let sf_vd = self.prf_output.expect("Prf output should be set").sf_vd;
 
         let ctx = &mut self.ctx;
         self.vm
@@ -698,7 +704,7 @@ where
             .set_cf_hash(&mut self.vm, hash)
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
-        let cf_vd = self.prf_out.expect("Prf output should be set").cf_vd;
+        let cf_vd = self.prf_output.expect("Prf output should be set").cf_vd;
 
         let ctx = &mut self.ctx;
         self.vm
@@ -773,6 +779,7 @@ where
             .map_err(|err| BackendError::Prf(err.to_string()))?;
 
         let ctx = &mut self.ctx;
+
         self.vm
             .flush(ctx)
             .await

@@ -66,6 +66,7 @@ pub struct MpcTlsFollower<K, P, C, Sc, Ctx, V> {
     close_notify: bool,
     /// Whether the leader has committed to the transcript.
     committed: bool,
+    pms: Option<Array<U8, 32>>,
 }
 
 impl<K, P, C, Sc, Ctx, V> MpcTlsFollower<K, P, C, Sc, Ctx, V>
@@ -111,6 +112,7 @@ where
             prf_output: None,
             close_notify: false,
             committed: false,
+            pms: None,
         }
     }
 
@@ -128,9 +130,10 @@ where
         // Setup
         let pms = self.ke.setup(vm)?.into_value();
 
-        let pms: Array<U8, 32> = vm.alloc().unwrap();
-        vm.mark_blind(pms).unwrap();
-        vm.commit(pms).unwrap();
+        //   let pms: Array<U8, 32> = vm.alloc().unwrap();
+        //   vm.mark_blind(pms).unwrap();
+        //   vm.commit(pms).unwrap();
+        self.pms = Some(pms);
 
         let prf_out = self.prf.setup(vm, pms)?;
         self.prf_output = Some(prf_out);
@@ -263,6 +266,7 @@ where
 
         // Key exchange
         let eq = self.ke.compute_pms(&mut self.vm)?;
+        let pms = self.vm.decode(self.pms.unwrap()).unwrap();
 
         // PRF
         let ctx = &mut self.ctx;
@@ -274,6 +278,8 @@ where
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        let pms = pms.await.unwrap();
+        println!("FOLLOWER: PMS: {:?}", pms);
         let swk = swk.await.unwrap();
         println!("FOLLOWER: SWK: {:?}", swk);
 

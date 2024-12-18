@@ -78,6 +78,7 @@ pub struct MpcTlsLeader<K, P, C, Sc, Ctx, V> {
     /// Whether we have already committed to the transcript.
     committed: bool,
     prf_output: Option<PrfOutput>,
+    pms: Option<Array<U8, 32>>,
 }
 
 impl<K, P, C, Sc, Ctx, V> MpcTlsLeader<K, P, C, Sc, Ctx, V>
@@ -124,6 +125,7 @@ where
             buffer: VecDeque::new(),
             committed: false,
             prf_output: None,
+            pms: None,
         }
     }
 
@@ -141,10 +143,11 @@ where
         // Setup
         let pms = self.ke.setup(vm)?.into_value();
 
-        let pms: Array<U8, 32> = vm.alloc().unwrap();
-        vm.mark_private(pms).unwrap();
-        vm.assign(pms, [1; 32]).unwrap();
-        vm.commit(pms).unwrap();
+        //    let pms: Array<U8, 32> = vm.alloc().unwrap();
+        //    vm.mark_private(pms).unwrap();
+        //    vm.assign(pms, [1; 32]).unwrap();
+        //    vm.commit(pms).unwrap();
+        self.pms = Some(pms);
 
         let prf_out = self.prf.setup(vm, pms)?;
         self.prf_output = Some(prf_out);
@@ -781,6 +784,8 @@ where
             .compute_pms(&mut self.vm)
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
+        let pms = self.vm.decode(self.pms.unwrap()).unwrap();
+
         self.prf
             .set_server_random(&mut self.vm, server_random.0)
             .map_err(|err| BackendError::Prf(err.to_string()))?;
@@ -801,6 +806,9 @@ where
             .flush(ctx)
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        let pms = pms.await.unwrap();
+        println!("LEADER: PMS: {:?}", pms);
+
         let swk = swk.await.unwrap();
         println!("LEADER: SWK: {:?}", swk);
 

@@ -143,10 +143,10 @@ where
         // Setup
         let pms = self.ke.setup(vm)?.into_value();
 
-        //    let pms: Array<U8, 32> = vm.alloc().unwrap();
-        //    vm.mark_private(pms).unwrap();
-        //    vm.assign(pms, [1; 32]).unwrap();
-        //    vm.commit(pms).unwrap();
+        // let pms: Array<U8, 32> = vm.alloc().unwrap();
+        // vm.mark_private(pms).unwrap();
+        // vm.assign(pms, [1; 32]).unwrap();
+        // vm.commit(pms).unwrap();
         self.pms = Some(pms);
 
         let prf_out = self.prf.setup(vm, pms)?;
@@ -651,6 +651,7 @@ where
 
     #[instrument(level = "debug", skip_all, err)]
     async fn get_server_finished_vd(&mut self, hash: Vec<u8>) -> Result<Vec<u8>, BackendError> {
+        println!("LEADER: Calling get_server_finished_vd");
         let hash: [u8; 32] = hash.try_into().map_err(|_| {
             BackendError::ServerFinished(
                 "server finished handshake hash is not 32 bytes".to_string(),
@@ -696,6 +697,7 @@ where
 
     #[instrument(level = "debug", skip_all, err)]
     async fn get_client_finished_vd(&mut self, hash: Vec<u8>) -> Result<Vec<u8>, BackendError> {
+        println!("LEADER: Calling get_client_finished_vd...");
         let hash: [u8; 32] = hash.try_into().map_err(|_| {
             BackendError::ClientFinished(
                 "client finished handshake hash is not 32 bytes".to_string(),
@@ -714,6 +716,10 @@ where
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
         let cf_vd = self.prf_output.expect("Prf output should be set").cf_vd;
+        let cf_vd = self
+            .vm
+            .decode(cf_vd)
+            .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
         let ctx = &mut self.ctx;
         self.vm
@@ -729,13 +735,11 @@ where
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
-        let cf_vd = self
-            .vm
-            .decode(cf_vd)
-            .map_err(|err| BackendError::ClientFinished(err.to_string()))?
+        let cf_vd = cf_vd
             .await
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
+        println!("LEADER: Finished get_client_finished_vd");
         Ok(cf_vd.to_vec())
     }
 
@@ -879,6 +883,7 @@ where
         msg: OpaqueMessage,
         _seq: u64,
     ) -> Result<PlainMessage, BackendError> {
+        println!("LEADER: Starting decrypt...");
         let msg = match msg.typ {
             ContentType::Handshake => self
                 .decrypt_server_finished(msg)

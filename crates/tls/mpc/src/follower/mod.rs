@@ -130,9 +130,9 @@ where
         // Setup
         let pms = self.ke.setup(vm)?.into_value();
 
-        //   let pms: Array<U8, 32> = vm.alloc().unwrap();
-        //   vm.mark_blind(pms).unwrap();
-        //   vm.commit(pms).unwrap();
+        //let pms: Array<U8, 32> = vm.alloc().unwrap();
+        //vm.mark_blind(pms).unwrap();
+        //vm.commit(pms).unwrap();
         self.pms = Some(pms);
 
         let prf_out = self.prf.setup(vm, pms)?;
@@ -313,14 +313,14 @@ where
 
         self.prf.set_cf_hash(&mut self.vm, handshake_hash)?;
         let prf_output = self.prf_output.expect("Prf output should be some");
-        let client_finished = prf_output.cf_vd;
-        let client_finished = self.vm.decode(client_finished).map_err(MpcTlsError::vm)?;
+        let cf_vd = prf_output.cf_vd;
+        let cf_vd = self.vm.decode(cf_vd).map_err(MpcTlsError::vm)?;
 
         let ctx = &mut self.ctx;
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        let client_finished = client_finished.await?;
+        let client_finished = cf_vd.await?;
 
         self.state = State::Cf(Cf {
             server_key,

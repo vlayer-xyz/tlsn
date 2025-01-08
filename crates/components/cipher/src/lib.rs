@@ -266,7 +266,9 @@ impl<C: CipherCircuit> CipherOutput<C> {
         }
 
         if let Some(msg) = message {
+            println!("Starting assigning cipher output...");
             vm.assign(self.input, msg).map_err(CipherError::new)?;
+            println!("Finished assigning cipher output");
         }
         vm.commit(self.input).map_err(CipherError::new)?;
 

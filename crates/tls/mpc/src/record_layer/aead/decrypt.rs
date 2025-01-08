@@ -93,6 +93,7 @@ impl AesGcmDecrypt {
         V: Vm<Binary> + View<Binary> + Execute<Ctx>,
         Ctx: Context,
     {
+        println!("ROLE: {:?}, Starting decrypting...", self.role);
         let len = requests.len();
         let mut decrypt = Decrypt::new(self.role, self.ghash.clone(), len);
         let mut plaintext_refs = Vec::with_capacity(len);
@@ -116,6 +117,7 @@ impl AesGcmDecrypt {
             vm.mark_public(cipher_ref).map_err(MpcTlsError::vm)?;
 
             let cipher_out = keystream.apply(vm, cipher_ref).map_err(MpcTlsError::vm)?;
+            println!("ROLE: {:?}, Assigning for plaintext_ref...", self.role);
             let plaintext_ref = cipher_out
                 .assign(
                     vm,
@@ -144,6 +146,7 @@ impl AesGcmDecrypt {
 
         let messages = decrypt.compute(ctx).await?;
 
+        println!("ROLE: {:?}, Finished decrypting", self.role);
         Ok((messages, plaintext_refs))
     }
 
@@ -166,6 +169,7 @@ impl AesGcmDecrypt {
         V: Vm<Binary> + View<Binary> + Execute<Ctx>,
         Ctx: Context,
     {
+        println!("Decrypting local...");
         // Tag verification was already done, so we only decrypt locally.
         let len = requests.len();
         let mut plaintexts = match self.role {
@@ -307,6 +311,7 @@ impl AesGcmDecrypt {
         V: Vm<Binary> + View<Binary> + Execute<Ctx>,
         Ctx: Context,
     {
+        println!("Starting prove...");
         let len = plaintext_refs.len();
 
         let mut future = FuturesOrdered::new();
@@ -324,6 +329,7 @@ impl AesGcmDecrypt {
             let cipher_out = keystream
                 .apply(vm, plaintext_ref)
                 .map_err(MpcTlsError::vm)?;
+            println!("ROLE: {:?}, Assigning for proving...", self.role);
             let cipher_ref = cipher_out
                 .assign(vm, explicit_nonce, START_COUNTER, plaintext)
                 .map_err(MpcTlsError::vm)?;
@@ -341,6 +347,7 @@ impl AesGcmDecrypt {
             ciphertexts.push(ciphertext?);
         }
 
+        println!("Finished prove...");
         Ok(ciphertexts)
     }
 

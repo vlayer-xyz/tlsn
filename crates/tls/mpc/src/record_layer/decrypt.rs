@@ -212,6 +212,7 @@ impl<Sc> Decrypter<Sc> {
         V: Vm<Binary> + View<Binary> + Execute<Ctx>,
         Ctx: Context,
     {
+        println!("Starting decrypt_public...");
         let DecryptState::Ready(ref mut aes) = self.state else {
             return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
         };
@@ -253,6 +254,7 @@ impl<Sc> Decrypter<Sc> {
         V: Vm<Binary> + View<Binary> + Execute<Ctx>,
         Ctx: Context,
     {
+        println!("Starting decrypt_private...");
         let DecryptState::Ready(ref mut aes) = self.state else {
             return Err(MpcTlsError::decrypt("Decrypter is not in Ready state"));
         };

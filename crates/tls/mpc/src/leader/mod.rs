@@ -209,9 +209,9 @@ where
         self.prf.set_client_random(vm, Some(client_random))?;
 
         // Flush and preprocess
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        //        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        //        vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
+        //        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
         self.ke
             .flush(ctx)
@@ -850,6 +850,7 @@ where
         msg: PlainMessage,
         _seq: u64,
     ) -> Result<OpaqueMessage, BackendError> {
+        println!("LEADER: Starting encrypt...");
         let msg = match msg.typ {
             ContentType::Handshake => self
                 .encrypt_client_finished(msg)

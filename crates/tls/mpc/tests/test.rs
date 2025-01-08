@@ -9,7 +9,7 @@ use mpz_core::Block;
 use mpz_fields::{gf2_128::Gf2_128, p256::P256, Field};
 use mpz_garble::protocol::semihonest::{Evaluator, Generator};
 use mpz_memory_core::{binary::Binary, correlated::Delta, View};
-use mpz_ole::{ideal::IdealROLE, ROLEReceiver, ROLESender};
+use mpz_ole::{ideal::ideal_role, ROLEReceiver, ROLESender};
 use mpz_ot::ideal::cot::ideal_cot;
 use mpz_vm_core::{Execute, Vm};
 use rand::{rngs::StdRng, SeedableRng};
@@ -53,14 +53,7 @@ where
     F: Field + Serialize + Deserialize,
     Ctx: Context,
 {
-    let mut rng = StdRng::seed_from_u64(0);
-    let block = Block::random(&mut rng);
-    let role = IdealROLE::new(block);
-
-    let sender = role.clone();
-    let receiver = role;
-
-    (sender, receiver)
+    ideal_role()
 }
 
 async fn leader<Ctx, RSGF>(
@@ -119,12 +112,14 @@ async fn leader<Ctx, RSGF>(
     .unwrap();
 
     let (client_socket, server_socket) = tokio::io::duplex(1 << 16);
+    println!("here1");
 
     tokio::spawn(bind_test_server_hyper(server_socket.compat()));
 
     let (mut conn, conn_fut) = bind_client(client_socket.compat(), client);
 
     tokio::spawn(async { conn_fut.await.unwrap() });
+    println!("here2");
 
     let msg = concat!(
         "POST /echo HTTP/1.1\r\n",
@@ -138,13 +133,16 @@ async fn leader<Ctx, RSGF>(
     );
 
     conn.write_all(msg.as_bytes()).await.unwrap();
+    println!("here3");
 
     let mut buf = vec![0u8; 48];
     conn.read_exact(&mut buf).await.unwrap();
+    println!("here4");
 
     println!("{}", String::from_utf8_lossy(&buf));
 
     leader_ctrl.defer_decryption().await.unwrap();
+    println!("here5");
 
     let msg = concat!(
         "POST /echo HTTP/1.1\r\n",

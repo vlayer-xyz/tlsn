@@ -194,9 +194,9 @@ where
         self.prf.set_client_random(vm, None)?;
 
         // Flush and preprocess
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        //  vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        //  vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
+        //  vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
         self.ke
             .flush(ctx)

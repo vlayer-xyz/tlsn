@@ -651,7 +651,7 @@ where
 
     #[instrument(level = "debug", skip_all, err)]
     async fn get_server_finished_vd(&mut self, hash: Vec<u8>) -> Result<Vec<u8>, BackendError> {
-        println!("LEADER: Calling get_server_finished_vd");
+        println!("LEADER: Calling get_server_finished_vd...");
         let hash: [u8; 32] = hash.try_into().map_err(|_| {
             BackendError::ServerFinished(
                 "server finished handshake hash is not 32 bytes".to_string(),
@@ -670,6 +670,10 @@ where
             .map_err(|err| BackendError::ServerFinished(err.to_string()))?;
 
         let sf_vd = self.prf_output.expect("Prf output should be set").sf_vd;
+        let sf_vd = self
+            .vm
+            .decode(sf_vd)
+            .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
         let ctx = &mut self.ctx;
         self.vm
@@ -685,13 +689,11 @@ where
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
-        let sf_vd = self
-            .vm
-            .decode(sf_vd)
-            .map_err(|err| BackendError::ClientFinished(err.to_string()))?
+        let sf_vd = sf_vd
             .await
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
+        println!("LEADER: Finished get_server_finished_vd");
         Ok(sf_vd.to_vec())
     }
 
@@ -874,7 +876,7 @@ where
                 ))
             }
         };
-
+        println!("LEADER: Finished encrypt");
         Ok(msg)
     }
 
@@ -904,6 +906,7 @@ where
             }
         };
 
+        println!("LEADER: Finished decrypt");
         Ok(msg)
     }
 

@@ -18,7 +18,7 @@ use tls_client::Certificate;
 use tls_client_async::bind_client;
 use tls_mpc::{
     build_follower, build_leader, MpcTlsCommonConfig, MpcTlsFollower, MpcTlsFollowerConfig,
-    MpcTlsLeader, MpcTlsLeaderConfig,
+    MpcTlsLeader, MpcTlsLeaderConfig, TranscriptConfig,
 };
 use tls_server_fixture::{bind_test_server_hyper, CA_CERT_DER, SERVER_DOMAIN};
 use tokio_util::compat::TokioAsyncReadCompatExt;
@@ -71,7 +71,17 @@ async fn leader<Ctx, RSGF>(
     let (ke, prf, cipher, encrypter, decrypter) =
         build_leader::<Ctx, _, _, _, _>(rs_p_0, rr_p_1, rs_gf_0, rs_gf_1);
 
-    let common_config = MpcTlsCommonConfig::builder().build().unwrap();
+    let rx_config = TranscriptConfig::builder()
+        .max_online_size(1 << 14)
+        .max_offline_size(1 << 14)
+        .build()
+        .unwrap();
+
+    let common_config = MpcTlsCommonConfig::builder()
+        .rx_config(rx_config)
+        .build()
+        .unwrap();
+
     let mut leader = MpcTlsLeader::<_, _, _, _, Ctx, _>::new(
         MpcTlsLeaderConfig::builder()
             .common(common_config)
@@ -186,7 +196,17 @@ async fn follower<Ctx, RRGF>(
     let (ke, prf, cipher, encrypter, decrypter) =
         build_follower::<Ctx, _, _, _, _>(rs_p_1, rr_p_0, rr_gf_0, rr_gf_1);
 
-    let common_config = MpcTlsCommonConfig::builder().build().unwrap();
+    let rx_config = TranscriptConfig::builder()
+        .max_online_size(1 << 14)
+        .max_offline_size(1 << 14)
+        .build()
+        .unwrap();
+
+    let common_config = MpcTlsCommonConfig::builder()
+        .rx_config(rx_config)
+        .build()
+        .unwrap();
+
     let mut follower = MpcTlsFollower::<_, _, _, _, Ctx, _>::new(
         MpcTlsFollowerConfig::builder()
             .common(common_config)

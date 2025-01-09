@@ -166,7 +166,6 @@ impl AesGcmDecrypt {
         V: Vm<Binary> + View<Binary> + Execute<Ctx>,
         Ctx: Context,
     {
-        println!("Decrypting local...");
         // Tag verification was already done, so we only decrypt locally.
         let len = requests.len();
         let mut plaintexts = match self.role {

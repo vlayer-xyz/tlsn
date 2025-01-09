@@ -9,7 +9,7 @@ use mpz_core::Block;
 use mpz_fields::{gf2_128::Gf2_128, p256::P256, Field};
 use mpz_garble::protocol::semihonest::{Evaluator, Generator};
 use mpz_memory_core::{binary::Binary, correlated::Delta, View};
-use mpz_ole::{ideal::IdealROLE, ROLEReceiver, ROLESender};
+use mpz_ole::{ideal::ideal_role, ROLEReceiver, ROLESender};
 use mpz_ot::ideal::cot::ideal_cot;
 use mpz_vm_core::{Execute, Vm};
 use rand::{rngs::StdRng, SeedableRng};
@@ -18,7 +18,7 @@ use tls_client::Certificate;
 use tls_client_async::bind_client;
 use tls_mpc::{
     build_follower, build_leader, MpcTlsCommonConfig, MpcTlsFollower, MpcTlsFollowerConfig,
-    MpcTlsLeader, MpcTlsLeaderConfig,
+    MpcTlsLeader, MpcTlsLeaderConfig, TranscriptConfig,
 };
 use tls_server_fixture::{bind_test_server_hyper, CA_CERT_DER, SERVER_DOMAIN};
 use tokio_util::compat::TokioAsyncReadCompatExt;
@@ -53,14 +53,7 @@ where
     F: Field + Serialize + Deserialize,
     Ctx: Context,
 {
-    let mut rng = StdRng::seed_from_u64(0);
-    let block = Block::random(&mut rng);
-    let role = IdealROLE::new(block);
-
-    let sender = role.clone();
-    let receiver = role;
-
-    (sender, receiver)
+    ideal_role()
 }
 
 async fn leader<Ctx, RSGF>(
@@ -78,7 +71,17 @@ async fn leader<Ctx, RSGF>(
     let (ke, prf, cipher, encrypter, decrypter) =
         build_leader::<Ctx, _, _, _, _>(rs_p_0, rr_p_1, rs_gf_0, rs_gf_1);
 
-    let common_config = MpcTlsCommonConfig::builder().build().unwrap();
+    let rx_config = TranscriptConfig::builder()
+        .max_online_size(1 << 14)
+        .max_offline_size(1 << 14)
+        .build()
+        .unwrap();
+
+    let common_config = MpcTlsCommonConfig::builder()
+        .rx_config(rx_config)
+        .build()
+        .unwrap();
+
     let mut leader = MpcTlsLeader::<_, _, _, _, Ctx, _>::new(
         MpcTlsLeaderConfig::builder()
             .common(common_config)
@@ -119,11 +122,9 @@ async fn leader<Ctx, RSGF>(
     .unwrap();
 
     let (client_socket, server_socket) = tokio::io::duplex(1 << 16);
-
     tokio::spawn(bind_test_server_hyper(server_socket.compat()));
 
     let (mut conn, conn_fut) = bind_client(client_socket.compat(), client);
-
     tokio::spawn(async { conn_fut.await.unwrap() });
 
     let msg = concat!(
@@ -141,7 +142,6 @@ async fn leader<Ctx, RSGF>(
 
     let mut buf = vec![0u8; 48];
     conn.read_exact(&mut buf).await.unwrap();
-
     println!("{}", String::from_utf8_lossy(&buf));
 
     leader_ctrl.defer_decryption().await.unwrap();
@@ -188,7 +188,17 @@ async fn follower<Ctx, RRGF>(
     let (ke, prf, cipher, encrypter, decrypter) =
         build_follower::<Ctx, _, _, _, _>(rs_p_1, rr_p_0, rr_gf_0, rr_gf_1);
 
-    let common_config = MpcTlsCommonConfig::builder().build().unwrap();
+    let rx_config = TranscriptConfig::builder()
+        .max_online_size(1 << 14)
+        .max_offline_size(1 << 14)
+        .build()
+        .unwrap();
+
+    let common_config = MpcTlsCommonConfig::builder()
+        .rx_config(rx_config)
+        .build()
+        .unwrap();
+
     let mut follower = MpcTlsFollower::<_, _, _, _, Ctx, _>::new(
         MpcTlsFollowerConfig::builder()
             .common(common_config)

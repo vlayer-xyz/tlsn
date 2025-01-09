@@ -199,10 +199,11 @@ where
         let client_random = self.state.try_as_ke()?.client_random.0;
         self.prf.set_client_random(vm, Some(client_random))?;
 
+        // TODO: Enable preprocessing
         // Flush and preprocess
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        // vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        // vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
+        // vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
         self.ke
             .flush(ctx)
@@ -660,6 +661,10 @@ where
             .map_err(|err| BackendError::ServerFinished(err.to_string()))?;
 
         let sf_vd = self.prf_output.expect("Prf output should be set").sf_vd;
+        let sf_vd = self
+            .vm
+            .decode(sf_vd)
+            .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
         let ctx = &mut self.ctx;
         self.vm
@@ -675,10 +680,7 @@ where
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
-        let sf_vd = self
-            .vm
-            .decode(sf_vd)
-            .map_err(|err| BackendError::ClientFinished(err.to_string()))?
+        let sf_vd = sf_vd
             .await
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
@@ -705,6 +707,10 @@ where
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
         let cf_vd = self.prf_output.expect("Prf output should be set").cf_vd;
+        let cf_vd = self
+            .vm
+            .decode(cf_vd)
+            .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
         let ctx = &mut self.ctx;
         self.vm
@@ -720,10 +726,7 @@ where
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
-        let cf_vd = self
-            .vm
-            .decode(cf_vd)
-            .map_err(|err| BackendError::ClientFinished(err.to_string()))?
+        let cf_vd = cf_vd
             .await
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
@@ -797,8 +800,8 @@ where
             .await
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
-        // Set ghash keys
         // TODO: Optimize this with ctx try join
+        // Set ghash keys
         self.encrypter
             .start(ctx)
             .await

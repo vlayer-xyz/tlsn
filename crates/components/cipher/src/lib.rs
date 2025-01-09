@@ -240,6 +240,59 @@ impl<C: CipherCircuit> CipherOutput<C> {
             Input::Length(len) => (len, None),
         };
 
+        self.assign_nonce_and_ctr(vm, explicit_nonce, start_ctr, len)?;
+
+        if let Some(msg) = message {
+            vm.assign(self.input, msg).map_err(CipherError::new)?;
+        }
+        vm.commit(self.input).map_err(CipherError::new)?;
+
+        Ok(self.output)
+    }
+
+    /// Assigns nonces and counters but reuses already assigned references for the message
+    /// inputs.
+    ///
+    /// # Arguments
+    ///
+    /// * `vm` - The necessary virtual machine.
+    /// * `explicit_nonce` - The TLS explicit nonce.
+    /// * `start_ctr` - The TLS counter number to start with.
+    /// * `len` - The length of the message to en-/decrypt.
+    pub fn assign_reuse<V>(
+        self,
+        vm: &mut V,
+        explicit_nonce: <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear,
+        start_ctr: u32,
+        len: usize,
+    ) -> Result<Vector<U8>, CipherError>
+    where
+        V: Vm<Binary>,
+        <<C as CipherCircuit>::Counter as Repr<Binary>>::Clear: From<[u8; 4]>,
+        <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear: Copy,
+    {
+        self.assign_nonce_and_ctr(vm, explicit_nonce, start_ctr, len)?;
+        Ok(self.output)
+    }
+
+    /// Returns the stream length in bytes.
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.input.len()
+    }
+
+    fn assign_nonce_and_ctr<V>(
+        &self,
+        vm: &mut V,
+        explicit_nonce: <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear,
+        start_ctr: u32,
+        len: usize,
+    ) -> Result<(), CipherError>
+    where
+        V: Vm<Binary>,
+        <<C as CipherCircuit>::Counter as Repr<Binary>>::Clear: From<[u8; 4]>,
+        <<C as CipherCircuit>::Nonce as Repr<Binary>>::Clear: Copy,
+    {
         if self.len() != len {
             return Err(CipherError::new(format!(
                 "message has wrong length, got {}, but expected {}",
@@ -254,9 +307,10 @@ impl<C: CipherCircuit> CipherOutput<C> {
 
         for ((ctr, ctr_value), nonce) in self
             .counters
-            .into_iter()
+            .iter()
+            .copied()
             .zip(counters)
-            .zip(self.explicit_nonces)
+            .zip(self.explicit_nonces.iter().copied())
         {
             vm.assign(ctr, ctr_value.into()).map_err(CipherError::new)?;
             vm.commit(ctr).map_err(CipherError::new)?;
@@ -265,20 +319,7 @@ impl<C: CipherCircuit> CipherOutput<C> {
             vm.commit(nonce).map_err(CipherError::new)?;
         }
 
-        if let Some(msg) = message {
-            println!("Starting assigning cipher output...");
-            vm.assign(self.input, msg).map_err(CipherError::new)?;
-            println!("Finished assigning cipher output");
-        }
-        vm.commit(self.input).map_err(CipherError::new)?;
-
-        Ok(self.output)
-    }
-
-    /// Returns the stream length in bytes.
-    #[allow(clippy::len_without_is_empty)]
-    pub fn len(&self) -> usize {
-        self.input.len()
+        Ok(())
     }
 }
 

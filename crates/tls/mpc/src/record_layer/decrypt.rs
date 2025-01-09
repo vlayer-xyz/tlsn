@@ -285,9 +285,7 @@ impl<Sc> Decrypter<Sc> {
         }
 
         // TODO: Use zk vm here:
-        let ciphertexts = aes
-            .prove(vm, ctx, messages.clone(), plaintext_refs, explicit_nonces)
-            .await?;
+        let ciphertexts = aes.prove(vm, ctx, plaintext_refs, explicit_nonces).await?;
 
         if ciphertexts != purported_ciphertexts {
             return Err(MpcTlsError::other(

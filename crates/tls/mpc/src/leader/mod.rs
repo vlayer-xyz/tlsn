@@ -428,8 +428,21 @@ where
 
         if !self.buffer.is_empty() {
             self.buffer.make_contiguous();
+
+            // We need to filter here for application data, because the follower buffer
+            // only contains application data, while the leader buffer also contains
+            // non-application data.
+            let application_data: Vec<OpaqueMessage> = self
+                .buffer
+                .as_slices()
+                .0
+                .iter()
+                .filter(|&m| m.typ == ContentType::ApplicationData)
+                .cloned()
+                .collect();
+
             self.decrypter
-                .verify_tags(&mut self.vm, &mut self.ctx, self.buffer.as_slices().0)
+                .verify_tags(&mut self.vm, &mut self.ctx, &application_data)
                 .await?;
             self.decode_key().await?;
             self.is_decrypting = true;

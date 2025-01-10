@@ -125,7 +125,7 @@ async fn leader<Ctx, RSGF>(
     tokio::spawn(bind_test_server_hyper(server_socket.compat()));
 
     let (mut conn, conn_fut) = bind_client(client_socket.compat(), client);
-    tokio::spawn(async { conn_fut.await.unwrap() });
+    let handle = tokio::spawn(async { conn_fut.await.unwrap() });
 
     let msg = concat!(
         "POST /echo HTTP/1.1\r\n",
@@ -160,7 +160,7 @@ async fn leader<Ctx, RSGF>(
     conn.write_all(msg.as_bytes()).await.unwrap();
 
     // Wait for the server to reply.
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     leader_ctrl.commit().await.unwrap();
 
@@ -170,6 +170,7 @@ async fn leader<Ctx, RSGF>(
     leader_ctrl.close_connection().await.unwrap();
     conn.close().await.unwrap();
 
+    handle.await.unwrap();
     //vm.finalize().await.unwrap();
 }
 
@@ -226,7 +227,7 @@ async fn follower<Ctx, RRGF>(
 
 #[tokio::test]
 #[ignore]
-async fn test() {
+async fn component_integration_test() {
     tracing_subscriber::fmt::init();
 
     let (leader_mux, follower_mux) = test_framed_mux(8);

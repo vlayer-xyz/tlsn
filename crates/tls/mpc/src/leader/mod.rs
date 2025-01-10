@@ -415,6 +415,8 @@ where
 
     #[instrument(level = "debug", skip_all, err)]
     async fn commit(&mut self) -> Result<(), MpcTlsError> {
+        println!("LEADER, starting commit...");
+        println!("LEADER commit is {}", self.committed);
         if self.committed {
             return Ok(());
         }
@@ -426,16 +428,30 @@ where
 
         self.committed = true;
 
+        println!("LEADER: Buffer is {:?}", self.buffer);
         if !self.buffer.is_empty() {
             self.buffer.make_contiguous();
+
+            // TODO: This is not correct but for some reason the follower side is missing an alert
+            // message in its buffer...
+            let application_data: Vec<OpaqueMessage> = self
+                .buffer
+                .as_slices()
+                .0
+                .iter()
+                .filter(|&m| m.typ == ContentType::ApplicationData)
+                .cloned()
+                .collect();
+
             self.decrypter
-                .verify_tags(&mut self.vm, &mut self.ctx, self.buffer.as_slices().0)
+                .verify_tags(&mut self.vm, &mut self.ctx, &application_data)
                 .await?;
             self.decode_key().await?;
             self.is_decrypting = true;
             self.notifier.set();
         }
 
+        println!("LEADER, finished commit");
         Ok(())
     }
 
@@ -475,6 +491,7 @@ where
 
     #[instrument(level = "debug", skip_all, err)]
     async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
+        println!("{:?}, started decoding key...", self.role);
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;
 
@@ -493,6 +510,7 @@ where
         let (key, iv) = futures::try_join!(key.decode(), iv.decode())?;
         self.decrypter.set_key_and_iv(key, iv)?;
 
+        println!("{:?}, finished decoding key", self.role);
         Ok(())
     }
 }

@@ -144,6 +144,7 @@ async fn leader<Ctx, RSGF>(
     conn.read_exact(&mut buf).await.unwrap();
     println!("{}", String::from_utf8_lossy(&buf));
 
+    println!("LEADER calling defer decryption in test");
     leader_ctrl.defer_decryption().await.unwrap();
 
     let msg = concat!(
@@ -226,7 +227,7 @@ async fn follower<Ctx, RRGF>(
 
 #[tokio::test]
 #[ignore]
-async fn test() {
+async fn component_integration_test() {
     tracing_subscriber::fmt::init();
 
     let (leader_mux, follower_mux) = test_framed_mux(8);

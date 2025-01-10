@@ -554,6 +554,8 @@ where
     }
 
     async fn commit(&mut self) -> Result<(), MpcTlsError> {
+        println!("FOLLOWER, starting commit...");
+        println!("FOLLOWER commit is {}", self.committed);
         let Active { ref mut buffer, .. } = self.state.try_as_active_mut()?;
 
         debug!("leader committed transcript");
@@ -562,6 +564,7 @@ where
 
         // Reveal the AEAD key to the leader only if there are TLS messages which need
         // to be decrypted.
+        println!("FOLLOWER: Buffer is {:?}", buffer);
         if !buffer.is_empty() {
             buffer.make_contiguous();
             self.decrypter
@@ -570,11 +573,13 @@ where
             self.decode_key().await?;
         }
 
+        println!("FOLLOWER, finished commit");
         Ok(())
     }
 
     #[instrument(level = "debug", skip_all, err)]
     async fn decode_key(&mut self) -> Result<(), MpcTlsError> {
+        println!("{:?}, started decoding key...", self.role);
         let vm = &mut self.vm;
         let ctx = &mut self.ctx;
 
@@ -593,6 +598,7 @@ where
         let (key, iv) = futures::try_join!(key.decode(), iv.decode())?;
         self.decrypter.set_key_and_iv(key, iv)?;
 
+        println!("{:?}, finished decoding key", self.role);
         Ok(())
     }
 }

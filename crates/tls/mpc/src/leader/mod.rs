@@ -77,7 +77,7 @@ pub struct MpcTlsLeader<K, P, C, Sc, Ctx, V> {
     buffer: VecDeque<OpaqueMessage>,
     /// Whether we have already committed to the transcript.
     committed: bool,
-    prf_out: Option<PrfOutput>,
+    prf_output: Option<PrfOutput>,
 }
 
 impl<K, P, C, Sc, Ctx, V> MpcTlsLeader<K, P, C, Sc, Ctx, V>
@@ -123,7 +123,7 @@ where
             is_decrypting,
             buffer: VecDeque::new(),
             committed: false,
-            prf_out: None,
+            prf_output: None,
         }
     }
 
@@ -141,6 +141,7 @@ where
         // Setup
         let pms = self.ke.setup(vm)?.into_value();
         let prf_out = self.prf.setup(vm, pms)?;
+        self.prf_output = Some(prf_out);
 
         // Set up encryption
         self.cipher.set_key(prf_out.keys.client_write_key);
@@ -198,10 +199,11 @@ where
         let client_random = self.state.try_as_ke()?.client_random.0;
         self.prf.set_client_random(vm, Some(client_random))?;
 
+        // TODO: Enable preprocessing
         // Flush and preprocess
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        // vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        // vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
+        // vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
         self.ke
             .flush(ctx)
@@ -426,8 +428,21 @@ where
 
         if !self.buffer.is_empty() {
             self.buffer.make_contiguous();
+
+            // We need to filter here for application data, because the follower buffer
+            // only contains application data, while the leader buffer also contains
+            // non-application data.
+            let application_data: Vec<OpaqueMessage> = self
+                .buffer
+                .as_slices()
+                .0
+                .iter()
+                .filter(|&m| m.typ == ContentType::ApplicationData)
+                .cloned()
+                .collect();
+
             self.decrypter
-                .verify_tags(&mut self.vm, &mut self.ctx, self.buffer.as_slices().0)
+                .verify_tags(&mut self.vm, &mut self.ctx, &application_data)
                 .await?;
             self.decode_key().await?;
             self.is_decrypting = true;
@@ -591,6 +606,11 @@ where
                 .set_server_key(server_key)
                 .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
+            self.ke
+                .flush(&mut self.ctx)
+                .await
+                .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
+
             Ok(())
         }
     }
@@ -653,7 +673,11 @@ where
             .set_sf_hash(&mut self.vm, hash)
             .map_err(|err| BackendError::ServerFinished(err.to_string()))?;
 
-        let sf_vd = self.prf_out.expect("Prf output should be set").sf_vd;
+        let sf_vd = self.prf_output.expect("Prf output should be set").sf_vd;
+        let sf_vd = self
+            .vm
+            .decode(sf_vd)
+            .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
         let ctx = &mut self.ctx;
         self.vm
@@ -669,10 +693,7 @@ where
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
-        let sf_vd = self
-            .vm
-            .decode(sf_vd)
-            .map_err(|err| BackendError::ClientFinished(err.to_string()))?
+        let sf_vd = sf_vd
             .await
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
@@ -698,7 +719,11 @@ where
             .set_cf_hash(&mut self.vm, hash)
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
-        let cf_vd = self.prf_out.expect("Prf output should be set").cf_vd;
+        let cf_vd = self.prf_output.expect("Prf output should be set").cf_vd;
+        let cf_vd = self
+            .vm
+            .decode(cf_vd)
+            .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
         let ctx = &mut self.ctx;
         self.vm
@@ -714,10 +739,7 @@ where
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
 
-        let cf_vd = self
-            .vm
-            .decode(cf_vd)
-            .map_err(|err| BackendError::ClientFinished(err.to_string()))?
+        let cf_vd = cf_vd
             .await
             .map_err(|err| BackendError::ClientFinished(err.to_string()))?;
 
@@ -773,6 +795,7 @@ where
             .map_err(|err| BackendError::Prf(err.to_string()))?;
 
         let ctx = &mut self.ctx;
+
         self.vm
             .flush(ctx)
             .await
@@ -790,8 +813,8 @@ where
             .await
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
 
-        // Set ghash keys
         // TODO: Optimize this with ctx try join
+        // Set ghash keys
         self.encrypter
             .start(ctx)
             .await

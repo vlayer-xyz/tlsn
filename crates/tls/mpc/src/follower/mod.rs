@@ -185,10 +185,11 @@ where
         // Set client random
         self.prf.set_client_random(vm, None)?;
 
+        // TODO: Enable preprocessing
         // Flush and preprocess
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
-        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        //  vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        //  vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
+        //  vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
 
         self.ke
             .flush(ctx)
@@ -250,18 +251,19 @@ where
     async fn compute_key_exchange(&mut self, server_random: [u8; 32]) -> Result<(), MpcTlsError> {
         self.state.take().try_into_init()?;
 
-        // Key exchange
-        let eq = self.ke.compute_pms(&mut self.vm)?;
-
         let server_key = self
             .ke
             .server_key()
-            .expect("server key should be set after computing pms");
+            .expect("server key should be set for follower");
+
+        // Key exchange
+        let eq = self.ke.compute_pms(&mut self.vm)?;
 
         // PRF
         let ctx = &mut self.ctx;
         let vm = &mut self.vm;
         self.prf.set_server_random(vm, server_random)?;
+
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
@@ -294,14 +296,13 @@ where
 
         self.prf.set_cf_hash(&mut self.vm, handshake_hash)?;
         let prf_output = self.prf_output.expect("Prf output should be some");
-        let client_finished = prf_output.cf_vd;
-        let client_finished = self.vm.decode(client_finished).map_err(MpcTlsError::vm)?;
+        let cf_vd = self.vm.decode(prf_output.cf_vd).map_err(MpcTlsError::vm)?;
 
         let ctx = &mut self.ctx;
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        let client_finished = client_finished.await?;
+        let client_finished = cf_vd.await?;
 
         self.state = State::Cf(Cf {
             server_key,
@@ -320,23 +321,19 @@ where
 
         self.prf.set_sf_hash(&mut self.vm, handshake_hash)?;
         let prf_output = self.prf_output.expect("Prf output should be some");
-        let expected_server_finished = prf_output.sf_vd;
-        let expected_server_finished = self
-            .vm
-            .decode(expected_server_finished)
-            .map_err(MpcTlsError::vm)?;
+        let sf_vd = self.vm.decode(prf_output.sf_vd).map_err(MpcTlsError::vm)?;
 
         let ctx = &mut self.ctx;
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        let expected_server_finished = expected_server_finished.await?;
+        let sf_vd = sf_vd.await?;
 
         let Some(server_finished) = server_finished else {
             return Err(MpcTlsError::prf("server finished is not set"));
         };
 
-        if server_finished != expected_server_finished {
+        if server_finished != sf_vd {
             return Err(MpcTlsError::prf("server finished does not match"));
         }
 

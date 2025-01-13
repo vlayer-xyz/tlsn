@@ -291,7 +291,6 @@ impl AesGcmDecrypt {
     ///
     /// * `vm` - A virtual machine for 2PC.
     /// * `ctx` - The context for IO.
-    /// * `messages` - The plaintext messages, if available.
     /// * `plaintext_refs` - The plaintext references.
     /// * `explicit_nonces` - The TLS explicit nonces.
     #[instrument(level = "trace", skip_all, err)]
@@ -299,7 +298,6 @@ impl AesGcmDecrypt {
         &mut self,
         vm: &mut V,
         ctx: &mut Ctx,
-        messages: Option<Vec<PlainMessage>>,
         plaintext_refs: Vec<Vector<U8>>,
         explicit_nonces: Vec<[u8; 8]>,
     ) -> Result<Vec<Vec<u8>>, MpcTlsError>
@@ -308,29 +306,27 @@ impl AesGcmDecrypt {
         Ctx: Context,
     {
         let len = plaintext_refs.len();
-
         let mut future = FuturesOrdered::new();
+
         for k in 0..len {
             let explicit_nonce = explicit_nonces[k];
             let plaintext_ref = plaintext_refs[k];
             let plaintext_len = plaintext_ref.len();
 
             let keystream = self.keystream_zk.chunk_sufficient(plaintext_len)?;
-            let plaintext = match messages {
-                Some(ref plaintext) => Input::Message(plaintext[k].payload.0.clone()),
-                None => Input::Length(plaintext_len),
-            };
 
             let cipher_out = keystream
                 .apply(vm, plaintext_ref)
                 .map_err(MpcTlsError::vm)?;
             let cipher_ref = cipher_out
-                .assign(vm, explicit_nonce, START_COUNTER, plaintext)
-                .map_err(MpcTlsError::vm)?;
+                .assign_reuse(vm, explicit_nonce, START_COUNTER, plaintext_len)
+                .map_err(MpcTlsError::vm);
+            let cipher_ref = cipher_ref?;
 
             let ciphertext = vm.decode(cipher_ref).map_err(MpcTlsError::decode)?;
             future.push_back(ciphertext);
         }
+
         vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
         vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
         vm.flush(ctx).await.map_err(MpcTlsError::vm)?;

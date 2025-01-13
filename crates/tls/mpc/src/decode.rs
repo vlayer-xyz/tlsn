@@ -108,17 +108,20 @@ impl Decode {
         let mut otp_value = vec![0_u8; self.len];
         rng.fill_bytes(&mut otp_value);
 
-        let mut otp_0 = self.otp_0;
-        let mut otp_1 = self.otp_1;
+        let otp_0 = self.otp_0;
+        let otp_1 = self.otp_1;
 
-        if let TlsRole::Follower = self.role {
-            std::mem::swap(&mut otp_0, &mut otp_1);
+        if let TlsRole::Leader = self.role {
+            vm.mark_private(otp_0).map_err(MpcTlsError::vm)?;
+            vm.mark_blind(otp_1).map_err(MpcTlsError::vm)?;
+            vm.assign(otp_0, otp_value.clone())
+                .map_err(MpcTlsError::vm)?;
+        } else {
+            vm.mark_private(otp_1).map_err(MpcTlsError::vm)?;
+            vm.mark_blind(otp_0).map_err(MpcTlsError::vm)?;
+            vm.assign(otp_1, otp_value.clone())
+                .map_err(MpcTlsError::vm)?;
         }
-
-        vm.mark_private(otp_0).map_err(MpcTlsError::vm)?;
-        vm.mark_blind(otp_1).map_err(MpcTlsError::vm)?;
-        vm.assign(otp_0, otp_value.clone())
-            .map_err(MpcTlsError::vm)?;
 
         vm.commit(otp_0).map_err(MpcTlsError::vm)?;
         vm.commit(otp_1).map_err(MpcTlsError::vm)?;
@@ -229,4 +232,205 @@ pub(crate) fn build_otp_shared(len: usize) -> Arc<Circuit> {
     let circ = builder.build().expect("circuit should be valid");
 
     Arc::new(circ)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mpz_circuits::{ops::WrappingAdd, Circuit, CircuitBuilder};
+    use mpz_common::executor::test_st_executor;
+    use mpz_garble::protocol::semihonest::{Evaluator, Generator};
+    use mpz_memory_core::{
+        binary::U8, correlated::Delta, FromRaw, MemoryExt, ToRaw, Vector, ViewExt,
+    };
+    use mpz_ot::ideal::cot::{ideal_cot, IdealCOTReceiver, IdealCOTSender};
+    use mpz_vm_core::{CallBuilder, Execute, VmExt};
+    use rand::{rngs::StdRng, SeedableRng};
+
+    use crate::{decode::Decode, TlsRole};
+
+    #[tokio::test]
+    async fn test_decode_private() {
+        let (mut ctx_a, mut ctx_b) = test_st_executor(8);
+        let (mut gen, mut ev) = mock_vm();
+
+        let circ = build_adder();
+        let circ = Arc::new(circ);
+
+        let a = 128_u8;
+        let b = 127_u8;
+
+        let a_ref_gen: U8 = gen.alloc().unwrap();
+        let b_ref_gen: U8 = gen.alloc().unwrap();
+
+        let a_ref_ev: U8 = ev.alloc().unwrap();
+        let b_ref_ev: U8 = ev.alloc().unwrap();
+
+        let call_gen = CallBuilder::new(circ.clone())
+            .arg(a_ref_gen)
+            .arg(b_ref_gen)
+            .build()
+            .unwrap();
+        let call_ev = CallBuilder::new(circ)
+            .arg(a_ref_ev)
+            .arg(b_ref_ev)
+            .build()
+            .unwrap();
+
+        let output_gen: U8 = gen.call(call_gen).unwrap();
+        let output_ev: U8 = ev.call(call_ev).unwrap();
+
+        let output_gen: Vector<U8> = Vector::from_raw(output_gen.to_raw());
+        let output_ev: Vector<U8> = Vector::from_raw(output_ev.to_raw());
+
+        let output_gen = Decode::new(&mut gen, TlsRole::Leader, output_gen)
+            .unwrap()
+            .private(&mut gen)
+            .unwrap();
+        let output_ev = Decode::new(&mut ev, TlsRole::Follower, output_ev)
+            .unwrap()
+            .private(&mut ev)
+            .unwrap();
+
+        gen.mark_private(a_ref_gen).unwrap();
+        gen.mark_blind(b_ref_gen).unwrap();
+        gen.assign(a_ref_gen, a).unwrap();
+
+        ev.mark_private(b_ref_ev).unwrap();
+        ev.mark_blind(a_ref_ev).unwrap();
+        ev.assign(b_ref_ev, b).unwrap();
+
+        gen.commit(a_ref_gen).unwrap();
+        gen.commit(b_ref_gen).unwrap();
+
+        ev.commit(a_ref_ev).unwrap();
+        ev.commit(b_ref_ev).unwrap();
+
+        let (output_gen, output_ev) = tokio::try_join!(
+            async {
+                gen.flush(&mut ctx_a).await.unwrap();
+                gen.execute(&mut ctx_a).await.unwrap();
+                gen.flush(&mut ctx_a).await.unwrap();
+                output_gen.decode().await
+            },
+            async {
+                ev.flush(&mut ctx_b).await.unwrap();
+                ev.execute(&mut ctx_b).await.unwrap();
+                ev.flush(&mut ctx_b).await.unwrap();
+                output_ev.decode().await
+            }
+        )
+        .unwrap();
+
+        assert!(output_gen.is_some());
+        assert!(output_ev.is_none());
+
+        let output_gen = output_gen.unwrap().pop().unwrap();
+        assert_eq!(output_gen, a + b);
+    }
+
+    #[tokio::test]
+    async fn test_decode_shared() {
+        let (mut ctx_a, mut ctx_b) = test_st_executor(8);
+        let (mut gen, mut ev) = mock_vm();
+
+        let circ = build_adder();
+        let circ = Arc::new(circ);
+
+        let a = 128_u8;
+        let b = 127_u8;
+
+        let a_ref_gen: U8 = gen.alloc().unwrap();
+        let b_ref_gen: U8 = gen.alloc().unwrap();
+
+        let a_ref_ev: U8 = ev.alloc().unwrap();
+        let b_ref_ev: U8 = ev.alloc().unwrap();
+
+        let call_gen = CallBuilder::new(circ.clone())
+            .arg(a_ref_gen)
+            .arg(b_ref_gen)
+            .build()
+            .unwrap();
+        let call_ev = CallBuilder::new(circ)
+            .arg(a_ref_ev)
+            .arg(b_ref_ev)
+            .build()
+            .unwrap();
+
+        let output_gen: U8 = gen.call(call_gen).unwrap();
+        let output_ev: U8 = ev.call(call_ev).unwrap();
+
+        let output_gen: Vector<U8> = Vector::from_raw(output_gen.to_raw());
+        let output_ev: Vector<U8> = Vector::from_raw(output_ev.to_raw());
+
+        let output_gen = Decode::new(&mut gen, TlsRole::Leader, output_gen)
+            .unwrap()
+            .shared(&mut gen)
+            .unwrap();
+        let output_ev = Decode::new(&mut ev, TlsRole::Follower, output_ev)
+            .unwrap()
+            .shared(&mut ev)
+            .unwrap();
+
+        gen.mark_private(a_ref_gen).unwrap();
+        gen.mark_blind(b_ref_gen).unwrap();
+        gen.assign(a_ref_gen, a).unwrap();
+
+        ev.mark_private(b_ref_ev).unwrap();
+        ev.mark_blind(a_ref_ev).unwrap();
+        ev.assign(b_ref_ev, b).unwrap();
+
+        gen.commit(a_ref_gen).unwrap();
+        gen.commit(b_ref_gen).unwrap();
+
+        ev.commit(a_ref_ev).unwrap();
+        ev.commit(b_ref_ev).unwrap();
+
+        let (mut output_gen, mut output_ev) = tokio::try_join!(
+            async {
+                gen.flush(&mut ctx_a).await.unwrap();
+                gen.execute(&mut ctx_a).await.unwrap();
+                gen.flush(&mut ctx_a).await.unwrap();
+                output_gen.decode().await
+            },
+            async {
+                ev.flush(&mut ctx_b).await.unwrap();
+                ev.execute(&mut ctx_b).await.unwrap();
+                ev.flush(&mut ctx_b).await.unwrap();
+                output_ev.decode().await
+            }
+        )
+        .unwrap();
+
+        let output_gen = output_gen.pop().unwrap();
+        let output_ev = output_ev.pop().unwrap();
+
+        assert_eq!(output_gen + output_ev, a + b);
+    }
+
+    fn mock_vm() -> (Generator<IdealCOTSender>, Evaluator<IdealCOTReceiver>) {
+        let mut rng = StdRng::seed_from_u64(0);
+        let delta = Delta::random(&mut rng);
+
+        let (cot_send, cot_recv) = ideal_cot(delta.into_inner());
+
+        let gen = Generator::new(cot_send, [0u8; 16], delta);
+        let ev = Evaluator::new(cot_recv);
+
+        (gen, ev)
+    }
+
+    fn build_adder() -> Circuit {
+        let builder = CircuitBuilder::new();
+
+        let a = builder.add_input::<u8>();
+        let b = builder.add_input::<u8>();
+
+        let c = a.wrapping_add(b);
+
+        builder.add_output(c);
+
+        builder.build().unwrap()
+    }
 }

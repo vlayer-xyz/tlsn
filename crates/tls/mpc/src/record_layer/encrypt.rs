@@ -108,6 +108,7 @@ impl<Sc> Encrypter<Sc> {
         Sc: MultiplicativeToAdditive<Gf2_128, Future: Send>,
         Ctx: Context,
     {
+        println!("{:?}, starting to decode ghash key...", self.role);
         let EncryptState::Prepared {
             mut ghash,
             keystream,
@@ -118,6 +119,7 @@ impl<Sc> Encrypter<Sc> {
         };
 
         let key = ghash_key.decode().await?;
+        println!("{:?}, decoding ghash key done", self.role);
 
         ghash.set_key(key)?;
         ghash.flush(ctx).await?;

@@ -327,6 +327,7 @@ impl AesGcmDecrypt {
             future.push_back(ciphertext);
         }
 
+        // TODO: This needs to done differently, because it is inefficient.
         vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
         vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
         vm.flush(ctx).await.map_err(MpcTlsError::vm)?;

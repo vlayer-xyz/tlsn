@@ -187,9 +187,10 @@ where
 
         // TODO: Enable preprocessing
         // Flush and preprocess
-        //  vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        //  vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
-        //  vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        println!("FOLLOWER preprocess finished");
 
         self.ke
             .flush(ctx)
@@ -265,10 +266,14 @@ where
         self.prf.set_server_random(vm, server_random)?;
 
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        println!("FOLLOWER 1. flush done");
         self.vm.execute(ctx).await.map_err(MpcTlsError::vm)?;
+        println!("FOLLOWER execute done");
         self.vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        println!("FOLLOWER 2. flush done");
 
         eq.check().await.map_err(MpcTlsError::key_exchange)?;
+        println!("FOLLOWER EQ check done");
 
         // Encryption and decryption preparation.
         self.encrypter
@@ -279,6 +284,7 @@ where
             .start(ctx)
             .await
             .map_err(MpcTlsError::decrypt)?;
+        println!("FOLLOWER start done");
 
         self.state = State::Ke(Ke {
             server_key: PublicKey::new(
@@ -287,6 +293,7 @@ where
             ),
         });
 
+        println!("FOLLOWER compute key exchange done");
         Ok(())
     }
 

@@ -201,9 +201,10 @@ where
 
         // TODO: Enable preprocessing
         // Flush and preprocess
-        // vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
-        // vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
-        // vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.preprocess(ctx).await.map_err(MpcTlsError::vm)?;
+        vm.flush(ctx).await.map_err(MpcTlsError::vm)?;
+        println!("LEADER preprocess finished");
 
         self.ke
             .flush(ctx)
@@ -800,18 +801,22 @@ where
             .flush(ctx)
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        println!("LEADER 1. flush done");
         self.vm
             .execute(ctx)
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        println!("LEADER execute done");
         self.vm
             .flush(ctx)
             .await
             .map_err(|e| BackendError::InternalError(e.to_string()))?;
+        println!("LEADER 2. flush done");
 
         eq.check()
             .await
             .map_err(|err| BackendError::KeyExchange(err.to_string()))?;
+        println!("LEADER EQ check done");
 
         // TODO: Optimize this with ctx try join
         // Set ghash keys
@@ -823,6 +828,7 @@ where
             .start(ctx)
             .await
             .map_err(|err| BackendError::InternalError(err.to_string()))?;
+        println!("LEADER start done");
 
         self.state = State::Cf(Cf {
             data: MpcTlsData {
@@ -836,6 +842,8 @@ where
                 handshake_data,
             },
         });
+
+        println!("LEADER prepare encryption done");
 
         Ok(())
     }

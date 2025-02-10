@@ -6,7 +6,7 @@ members = [
     "crates/benches/browser/wasm",
     "crates/benches/library",
     "crates/common",
-    "crates/components/cipher",
+    #"crates/components/cipher",
     "crates/components/hmac-sha256",
     "crates/components/hmac-sha256-circuits",
     "crates/components/key-exchange",

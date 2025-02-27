@@ -21,8 +21,9 @@ use tracing_subscriber::{
     layer::SubscriberExt,
     util::SubscriberInitExt,
 };
-use tracing_web::MakeWebConsoleWriter;
+// use tracing_web::MakeWebConsoleWriter;
 use wasm_bindgen::prelude::*;
+pub mod ws_stream_wasm;
 
 use crate::types::{Attestation, Presentation, Reveal, Secrets};
 
@@ -50,8 +51,8 @@ pub fn init_logging(config: Option<LoggingConfig>) {
         .with_ansi(false) // Only partially supported across browsers
         .with_timer(UtcTime::rfc_3339()) // std::time is not available in browsers
         .with_span_events(fmt_span)
-        .without_time()
-        .with_writer(MakeWebConsoleWriter::new()); // write events to the console
+        .without_time();
+    // .with_writer(MakeWebConsoleWriter::new()); // write events to the console
 
     tracing_subscriber::registry()
         .with(FilterFn::new(log::filter(config)))

@@ -2,7 +2,7 @@ mod config;
 
 pub use config::VerifierConfig;
 
-use crate::ws_stream_wasm::WsStream;
+use crate::ws_stream_wasm::{WsMeta, WsStream};
 use enum_try_as_inner::EnumTryAsInner;
 use tlsn_verifier::{
     state::{self, Initialized},
@@ -10,7 +10,6 @@ use tlsn_verifier::{
 };
 use tracing::info;
 use wasm_bindgen::prelude::*;
-use ws_stream_wasm::WsMeta;
 
 use crate::types::VerifierOutput;
 

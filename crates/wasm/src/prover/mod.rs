@@ -2,6 +2,7 @@ mod config;
 
 pub use config::ProverConfig;
 
+use crate::ws_stream_wasm::WsMeta;
 use enum_try_as_inner::EnumTryAsInner;
 use futures::TryFutureExt;
 use http_body_util::{BodyExt, Full};
@@ -15,7 +16,6 @@ use tlsn_prover::{state, Prover};
 use tracing::info;
 use wasm_bindgen::{prelude::*, JsError};
 use wasm_bindgen_futures::spawn_local;
-use ws_stream_wasm::WsMeta;
 
 use crate::{io::FuturesIo, types::*};
 

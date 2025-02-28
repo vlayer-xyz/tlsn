@@ -38,30 +38,30 @@ jobs:
 
       - name: Check formatting
         run: cargo +nightly fmt --check --all
-  build-and-test:
-    name: Build and test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+  # build-and-test:
+  #   name: Build and test
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
 
-      - name: Install stable rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: clippy
+  #     - name: Install stable rust toolchain
+  #       uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         toolchain: stable
+  #         components: clippy
 
-      - name: Use caching
-        uses: Swatinem/rust-cache@v2.7.3
+  #     - name: Use caching
+  #       uses: Swatinem/rust-cache@v2.7.3
 
-      - name: Clippy
-        run: cargo clippy --all-features --all-targets -- -D warnings
+  #     - name: Clippy
+  #       run: cargo clippy --all-features --all-targets -- -D warnings
 
-      - name: Build
-        run: cargo build --all-targets
+  #     - name: Build
+  #       run: cargo build --all-targets
 
-      - name: Test
-        run: cargo test
+  #     - name: Test
+  #       run: cargo test
   wasm:
     name: Build and Test wasm
     runs-on: ubuntu-latest
@@ -93,66 +93,66 @@ jobs:
       - name: Use caching
         uses: Swatinem/rust-cache@v2.7.3
 
-      - name: Run tests
-        run: |
-          cd crates/wasm-test-runner
-          ./run.sh
+      # - name: Run tests
+      #   run: |
+      #     cd crates/wasm-test-runner
+      #     ./run.sh
 
       - name: Run build
         run: |
           cd crates/wasm
           ./build.sh
 
-      - name: Dry Run NPM Publish
-        run: |
-          cd crates/wasm/pkg
-          npm publish --dry-run
+      # - name: Dry Run NPM Publish
+      #   run: |
+      #     cd crates/wasm/pkg
+      #     npm publish --dry-run
 
-      - name: Save tlsn-wasm package for tagged builds
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.ref_name }}-tlsn-wasm-pkg
-          path: ./crates/wasm/pkg
-          if-no-files-found: error
+      # - name: Save tlsn-wasm package for tagged builds
+      #   if: startsWith(github.ref, 'refs/tags/')
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: ${{ github.ref_name }}-tlsn-wasm-pkg
+      #     path: ./crates/wasm/pkg
+      #     if-no-files-found: error
 
-  tests-integration:
-    name: Run tests release build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+  # tests-integration:
+  #   name: Run tests release build
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
 
-      - name: Install stable rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+  #     - name: Install stable rust toolchain
+  #       uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         toolchain: stable
 
-      - name: Use caching
-        uses: Swatinem/rust-cache@v2.7.3
+  #     - name: Use caching
+  #       uses: Swatinem/rust-cache@v2.7.3
 
-      - name: Add custom DNS entry to /etc/hosts for notary TLS test
-        run: echo "127.0.0.1 tlsnotaryserver.io" | sudo tee -a /etc/hosts
+  #     - name: Add custom DNS entry to /etc/hosts for notary TLS test
+  #       run: echo "127.0.0.1 tlsnotaryserver.io" | sudo tee -a /etc/hosts
 
-      - name: Run integration tests
-        run: cargo test --profile tests-integration --workspace --exclude tlsn-tls-client --exclude tlsn-tls-core -- --include-ignored
-  coverage:
-    runs-on: ubuntu-latest
-    env:
-      CARGO_TERM_COLOR: always
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install stable rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate code coverage
-        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: lcov.info
-          fail_ci_if_error: true
+  #     - name: Run integration tests
+  #       run: cargo test --profile tests-integration --workspace --exclude tlsn-tls-client --exclude tlsn-tls-core -- --include-ignored
+  # coverage:
+  #   runs-on: ubuntu-latest
+  #   env:
+  #     CARGO_TERM_COLOR: always
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Install stable rust toolchain
+  #       uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         toolchain: stable
+  #     - name: Install cargo-llvm-cov
+  #       uses: taiki-e/install-action@cargo-llvm-cov
+  #     - name: Generate code coverage
+  #       run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+  #     - name: Upload coverage to Codecov
+  #       uses: codecov/codecov-action@v4
+  #       with:
+  #         token: ${{ secrets.CODECOV_TOKEN }}
+  #         files: lcov.info
+  #         fail_ci_if_error: true

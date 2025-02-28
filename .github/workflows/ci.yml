@@ -98,6 +98,12 @@ jobs:
       #     cd crates/wasm-test-runner
       #     ./run.sh
 
+      - name: cargo tree
+        run: |
+          cd crates/wasm
+          cargo install cargo-tree
+          cargo tree
+
       - name: Run build
         run: |
           cd crates/wasm

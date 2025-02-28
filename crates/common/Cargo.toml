@@ -33,7 +33,7 @@ semver = { version = "1.0", features = ["serde"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2" }
-web-spawn = { workspace = true }
+# web-spawn = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }

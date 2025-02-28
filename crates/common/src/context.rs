@@ -13,7 +13,7 @@ pub fn build_mt_context(mux: MuxControl) -> Multithread {
 
     #[cfg(target_arch = "wasm32")]
     let builder = builder.spawn_handler(|f| {
-        let _ = web_spawn::spawn(f);
+        // let _ = web_spawn::spawn(f);
         Ok(())
     });
 

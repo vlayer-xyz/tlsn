@@ -31,14 +31,14 @@ pub async fn initialize(
 ) -> Result<(), JsValue> {
     log::init_logging(logging_config);
 
-    JsFuture::from(web_spawn::start_spawner()).await?;
+    // JsFuture::from(web_spawn::start_spawner()).await?;
 
     // Initialize rayon global thread pool.
     rayon::ThreadPoolBuilder::new()
         .num_threads(thread_count)
         .spawn_handler(|thread| {
             // Drop join handle.
-            let _ = web_spawn::spawn(move || thread.run());
+            // let _ = web_spawn::spawn(move || thread.run());
             Ok(())
         })
         .build_global()

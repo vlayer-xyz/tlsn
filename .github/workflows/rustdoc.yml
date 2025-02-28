@@ -3,7 +3,7 @@ name: rustdoc
 on:
   push:
     branches: [dev]
-  pull_request:
+  # pull_request:
 
 env:
   CARGO_TERM_COLOR: always

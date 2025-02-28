@@ -82,10 +82,10 @@ jobs:
           toolchain: nightly
           components: rust-src
 
-      - name: Install chromedriver
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-chromedriver
+      # - name: Install chromedriver
+      #   run: |
+      #     sudo apt-get update
+      #     sudo apt-get install -y chromium-chromedriver
 
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh

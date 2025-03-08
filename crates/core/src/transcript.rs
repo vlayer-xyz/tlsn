@@ -176,7 +176,7 @@ pub struct PartialTranscript {
 }
 
 impl PartialTranscript {
-    /// Creates a new partial transcript initalized to all 0s.
+    /// Creates a new partial transcript initialized to all 0s.
     ///
     /// # Arguments
     ///

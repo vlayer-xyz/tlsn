@@ -5,7 +5,7 @@
 # inter.der - intermediate certificate
 # ca.der - CA certificate
 
-# The key exchange paramaters and their signature were extracted from a live session as follows:
+# The key exchange parameters and their signature were extracted from a live session as follows:
 
 # while running tcpdump in one console
 tcpdump 'tcp port 443' -w out.pcap
